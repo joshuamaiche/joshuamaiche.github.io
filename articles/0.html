@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Look Ma: No Codegen! Tracking templates at compile-time using pure c++14</title>
+<title>article.md</title>
 <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
 
 <style>
@@ -365,60 +365,14 @@ code {
           : 'default'
     });
   </script>
-<h1 id="look-ma-no-codegen-tracking-templates-at-compile-time-using-pure-c14">Look Ma: No Codegen! Tracking templates at compile-time using pure c++14</h1>
-<h2 id="summary">Summary</h2>
-<p>In this article, I'll walk through how to build a TemplateTracker class that allows C++ code to automatically track all the types used to instantiate a template. This tracking happens at compile time using only C++ code. It supports C++14 or later. MSVC 16.3+ is supported with <code>/W4 /WX</code> flags. Clang 12+ and GCC 7+ are supported with <code>-Wall -Wextra -pedantic -Werror</code> flags.</p>
-<p>Here's an example of how it can be used:</p>
-<pre class="hljs"><code><div><span class="hljs-comment">// ***dummy_system.h***</span>
-<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">DummySystem</span> :</span> TemplateTracker&lt;DummySystem&gt; {
-    <span class="hljs-function"><span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span></span>;
-    <span class="hljs-function"><span class="hljs-keyword">static</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">GetAddedComponents</span><span class="hljs-params">()</span></span>;
-    <span class="hljs-function"><span class="hljs-keyword">static</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">GetRemovedComponents</span><span class="hljs-params">()</span></span>;
-};
-
-<span class="hljs-comment">// ***dummy_system.cpp***</span>
-<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">DummySystem::Act</span><span class="hljs-params">()</span> </span>{
-    <span class="hljs-keyword">const</span> <span class="hljs-keyword">size_t</span> entityId = <span class="hljs-number">1</span>;
-    AddComponent(entityId, <span class="hljs-literal">true</span>);
-    AddComponent(entityId, <span class="hljs-string">'a'</span>);
-    AddComponent(entityId, <span class="hljs-number">1</span>);
-    AddComponent(entityId, <span class="hljs-number">1.f</span>);
-    AddComponent(entityId, <span class="hljs-number">1.0</span>);
-    RemoveComponent&lt;<span class="hljs-keyword">float</span>&gt;(entityId);
-    RemoveComponent&lt;<span class="hljs-keyword">double</span>&gt;(entityId);
-}
-
-<span class="hljs-comment">// Compile-time info on which types were used with each function.</span>
-<span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;
-    DummySystem::Info&lt;&gt;::AddComponentTypes,
-    Typelist&lt;<span class="hljs-keyword">bool</span>, <span class="hljs-keyword">char</span>, <span class="hljs-keyword">int</span>, <span class="hljs-keyword">float</span>, <span class="hljs-keyword">double</span>&gt;
-&gt;::value, <span class="hljs-string">""</span>);
-<span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;DummySystem::Info&lt;&gt;::RemoveComponentTypes, Typelist&lt;<span class="hljs-keyword">float</span>, <span class="hljs-keyword">double</span>&gt;&gt;::value, <span class="hljs-string">""</span>);
-
-<span class="hljs-comment">// Dependent systems can use run-time info to avoid having to be recompiled as info changes.</span>
-<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">DummySystem::GetAddedComponents</span><span class="hljs-params">()</span> </span>{
-    <span class="hljs-comment">// Outputs {"bool", "char", "int", "float", "double"}.</span>
-    <span class="hljs-keyword">return</span> GetTypeNames(Info&lt;&gt;::AddComponentTypes{});
-}
-
-<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">DummySystem::GetRemovedComponents</span><span class="hljs-params">()</span> </span>{
-    <span class="hljs-comment">// Outputs {"float", "double"}.</span>
-    <span class="hljs-keyword">return</span> GetTypeNames(Info&lt;&gt;::RemoveComponentTypes{});
-}
-</div></code></pre>
-<p>I stumbled a lot trying to get this to work, so I'll be building up the solution gradually in hopes that it helps someone else that might be trying to solve the same problems. I'll be focusing on the practical (&quot;This won't compile until...&quot;) over the theoretical (&quot;The standard states that...&quot;) for a few reasons.</p>
-<ul>
-<li>Compilers have unique behaviors, so we can't just rely on the standard. With small tweaks, we can support all major compilers.</li>
-<li>I've tweaked this code to ensure it conforms to my understanding of the standard (especially section <a href="https://timsong-cpp.github.io/cppwp/n4140/temp.point#8">temp.point/8</a>). However, I am not a standards expert, and I want to avoid acting like one. I have not read all parts of the standard, and I could be misunderstanding the parts I've read. Please challenge me if you think you see something in the standard that would make this code ill-formed.</li>
-<li>Personally, I find it easier to work through practical examples.</li>
-</ul>
-<h2 id="motivation">Motivation</h2>
-<p>This section can be safely skipped without losing any details on how to implement a template tracker; it only exists to help illustrate why a template tracker is handy in a real-world scenario.</p>
+<h1 id="look-ma-no-codegen-tracking-templates-at-compile-time-using-pure-c14">Look Ma: No Codegen! Tracking Templates at Compile-Time Using Pure C++14</h1>
+<h2 id="table-of-contents">Table of Contents</h2>
+<h2 id="intro">Intro</h2>
 <p>I was working on my game engine, and I had a number of systems with <code>Act()</code> functions that would be called as the game ran.</p>
-<pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GameSystem</span> {</span> <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span></span>; };
-<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span> GameSystem { <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span></span>; }
-<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GraphicsSystem</span> :</span> GameSystem { <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span></span>; }
-<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">HealthSystem</span> :</span> GameSystem { <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span></span>; }
+<pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GameSystem</span> {</span> <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span></span>; };
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span> GameSystem { <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span></span>; }
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GraphicsSystem</span> :</span> GameSystem { <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span></span>; }
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">HealthSystem</span> :</span> GameSystem { <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span></span>; }
 
 <span class="hljs-comment">// Register systems</span>
 <span class="hljs-comment">// ...</span>
@@ -436,6 +390,24 @@ code {
         <span class="hljs-keyword">const</span> Velocity&amp; vel = GetComponent&lt;<span class="hljs-keyword">const</span> Velocity&gt;(id);
         Position&amp; pos = GetComponent&lt;Position&gt;(id);
         pos = pos + vel;
+    }
+}
+
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GraphicsSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetGraphicsEntities()) {
+        Render(
+            GetComponent&lt;<span class="hljs-keyword">const</span> Position&gt;(id),
+            GetComponent&lt;<span class="hljs-keyword">const</span> Mesh&gt;(id)
+        );
+    }
+}
+
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">HealthSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetHealthEntities()) {
+        HitPoints&amp; hitPoints = GetComponent&lt;HitPoints&gt;(id);
+        <span class="hljs-keyword">const</span> Damage&amp; damage = GetComponent&lt;<span class="hljs-keyword">const</span> Damage&gt;(id);
+        hitPoints -= damage;
+        RemoveComponent&lt;Damage&gt;(id);
     }
 }
 </div></code></pre>
@@ -487,8 +459,38 @@ code {
     };
 }
 </div></code></pre>
-<p>This approach was unappealing to me because I worried about it complicating the build process of my game. On top of this, I worried that it might be hard to track types that were indirectly accessed by calling an intermediate function that called <code>GetComponent()</code>. This is the option I understand the least though, so if you've had success with it, please let me know!</p>
-<p>This left me with the solution I'll be sharing here: A compile-time, pure C++ way to track template instantiations.</p>
+<p>While this approach seems ideal for a large project with a more refined build system, I didn't want to complicate the simple build process of my small game. On top of this, I worried about edge cases that might be hard for a codegen parser to catch. This is the option I understand the least though, so if you've had success with it, please let me know!</p>
+<p>This left me with the solution I'll be sharing here: A compile-time, pure C++ way to track template instantiations. Adapting a game system to use this is trivial: just inherit from <code>TemplateTracker</code>, and add a function that reads the the auto-generated typelist.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span>
+    <span class="hljs-keyword">public</span> GameSystem,
+    <span class="hljs-comment">// Added inheritance to TemplateTracker</span>
+    <span class="hljs-keyword">protected</span> TemplateTracker&lt;PhysicsSystem&gt;
+{
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+    <span class="hljs-comment">// Added function to get accessed types.</span>
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+};
+</div></code></pre>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.cpp***</span>
+<span class="hljs-comment">// PhysicsSystem::Act() stays exactly the same.</span>
+
+<span class="hljs-comment">// New function that accesses auto-generated typelist.</span>
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">PhysicsSystem::GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-comment">// TUs that call GetComponent() have compile-time info that lists all instances called.</span>
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;Info&lt;&gt;::GetComponentTypes, Typelist&lt;<span class="hljs-keyword">const</span> Velocity, Position&gt;&gt;::value, <span class="hljs-string">""</span>);
+ 
+    <span class="hljs-comment">// Run-time info can be returned for other TUs to use.</span>
+    <span class="hljs-keyword">return</span> GetTypeIDs(Info&lt;&gt;::GetComponentTypes{});
+}
+</div></code></pre>
+<p>I stumbled a lot trying to get this to work, so I'll be building up the solution gradually in hopes that it helps someone else that might be trying to solve the same problems. I'll be focusing on the practical (&quot;This won't compile until...&quot;) over the theoretical (&quot;The standard states that...&quot;) for a few reasons.</p>
+<ul>
+<li>Compilers have unique behaviors, so we can't just rely on the standard. With small tweaks, we can support all major compilers.</li>
+<li>I've tweaked this code to ensure it conforms to my understanding of the standard (especially section <a href="https://timsong-cpp.github.io/cppwp/n4140/temp.point#8">temp.point/8</a>). However, I am not a standards expert, and I want to avoid acting like one. I have not read all parts of the standard, and I could be misunderstanding the parts I've read. Please challenge me if you think you see something in the standard that would make this code ill-formed.</li>
+<li>Personally, I find it easier to work through practical examples.</li>
+</ul>
+<p>This implementation supports C++14 or later. MSVC 16.3+ is supported with <code>/W4 /WX</code> flags. Clang 12+ and GCC 7+ are supported with <code>-Wall -Wextra -pedantic -Werror</code> flags.</p>
 <h2 id="basic-setup">Basic setup</h2>
 <p>Before we can automatically track types, we need a way to represent types. I'll be using a simple typelist implementation. Any implementation will do, as long as it does the following:</p>
 <ul>
@@ -672,37 +674,6 @@ TypeSetter&lt;<span class="hljs-number">0</span>, <span class="hljs-keyword">flo
     <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">(Index&lt;Tag, n&gt;)</span> </span>{ <span class="hljs-keyword">return</span> Typelist&lt;T&gt;{}; }
 };
 </div></code></pre>
-<p>Finally, we'll locally disable some warnings that we know are safe to ignore.</p>
-<pre class="hljs"><code><div><span class="hljs-meta">#<span class="hljs-meta-keyword">if</span> defined(__GNUC__) &amp;&amp; !defined(__clang__)</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> GCC diagnostic push</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> GCC diagnostic ignored <span class="hljs-meta-string">"-Wnon-template-friend"</span></span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
-
-<span class="hljs-meta">#<span class="hljs-meta-keyword">ifdef</span> _MSC_VER</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( push )</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( disable : 4514 ) <span class="hljs-comment">// Unreferenced inline function</span></span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
-
-<span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
-<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Index</span> {</span>
-    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">(Index)</span></span>;
-};
-
-<span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n, <span class="hljs-keyword">typename</span> T&gt;
-<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TypeSetter</span> {</span>
-    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">(Index&lt;Tag, n&gt;)</span> </span>{
-        <span class="hljs-keyword">return</span> Typelist&lt;T&gt;{};
-    }
-};
-
-<span class="hljs-meta">#<span class="hljs-meta-keyword">ifdef</span> _MSC_VER</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( pop )</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
-
-<span class="hljs-meta">#<span class="hljs-meta-keyword">if</span> defined(__GNUC__) &amp;&amp; !defined(__clang__)</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> GCC diagnostic pop</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
-</div></code></pre>
 <p>And with this, <code>Index</code> and <code>TypeSetter</code> are in their final form! From here, we'll now be using these as core building blocks for the rest of our code.</p>
 <h2 id="checking-which-indices-are-set">Checking which indices are set</h2>
 <p>So far, we can declare a set of typelists in a function, and have them show up in another, which is already exciting. However, we're still missing some functionality to make this easy to use. Using the type indices directly is error-prone. Ideally, on the setting side, we would set our first type to index 0, then our next type to 1, and so on. On the getting side, we would like to automatically generate the full typelist, without having to know how many types have been tracked.</p>
@@ -725,7 +696,7 @@ TypeSetter&lt;<span class="hljs-number">0</span>, <span class="hljs-keyword">flo
     <span class="hljs-comment">// No indices to get wrong!</span>
     <span class="hljs-keyword">auto</span> obj0 = AddType&lt;GoodTag, <span class="hljs-keyword">float</span>&gt;{};
     <span class="hljs-keyword">auto</span> obj1 = AddType&lt;GoodTag, <span class="hljs-keyword">bool</span>&gt;{};
-    <span class="hljs-keyword">auto</span> obj2 = AddType&lt;GoodTag, <span class="hljs-number">3</span>, <span class="hljs-keyword">int</span>&gt;{};
+    <span class="hljs-keyword">auto</span> obj2 = AddType&lt;GoodTag, <span class="hljs-keyword">int</span>&gt;{};
 }
 
 <span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GoodGetterFunction</span><span class="hljs-params">()</span> </span>{
@@ -1039,7 +1010,7 @@ struct MaxIndex {
 <pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Identifier&gt;
 <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TemplateTracker</span> {</span>
 <span class="hljs-keyword">private</span>:
-    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">AddComponentTag</span>;</span>
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GetComponentTag</span>;</span>
     <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">RemoveComponentTag</span>;</span>
 };
 </div></code></pre>
@@ -1048,8 +1019,10 @@ struct MaxIndex {
     <span class="hljs-comment">// ...</span>
     
 <span class="hljs-keyword">public</span>:
-    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Component, <span class="hljs-keyword">typename</span> = <span class="hljs-keyword">decltype</span>(AddType&lt;AddComponentTag, Component&gt;())&gt;
-    <span class="hljs-keyword">static</span> <span class="hljs-keyword">const</span> Component&amp; AddComponent(<span class="hljs-keyword">size_t</span> <span class="hljs-comment">/*entityIndex*/</span>, <span class="hljs-keyword">const</span> Component&amp; component) {
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Component, <span class="hljs-keyword">typename</span> = <span class="hljs-keyword">decltype</span>(AddType&lt;GetComponentTag, Component&gt;())&gt;
+    <span class="hljs-keyword">static</span> Component&amp; GetComponent(<span class="hljs-keyword">size_t</span> <span class="hljs-comment">/*entityIndex*/</span>) {
+        <span class="hljs-comment">// Return a dummy component to illustrate example.</span>
+        <span class="hljs-keyword">static</span> Component component;
         <span class="hljs-keyword">return</span> component;
     }
 
@@ -1064,24 +1037,24 @@ struct MaxIndex {
     <span class="hljs-comment">// ...</span>
 
     <span class="hljs-keyword">template</span> &lt;
-        <span class="hljs-keyword">typename</span> AddComponentTagType = AddComponentTag,
+        <span class="hljs-keyword">typename</span> GetComponentTagType = GetComponentTag,
         <span class="hljs-keyword">typename</span> RemoveComponentTagType = RemoveComponentTag,
-        <span class="hljs-keyword">size_t</span> AddComponentTypesN = MaxIndex&lt;AddComponentTagType&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;,
-        <span class="hljs-keyword">size_t</span> RemoveComponentTypesN = MaxIndex&lt;RemoveComponentTagType&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;
+        <span class="hljs-keyword">size_t</span> getComponentTypesN = MaxIndex&lt;GetComponentTagType&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;,
+        <span class="hljs-keyword">size_t</span> removeComponentTypesN = MaxIndex&lt;RemoveComponentTagType&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;
     &gt;
     struct Info {
-        <span class="hljs-keyword">using</span> AddComponentTypes = ListGetter_t&lt;AddComponentTag, AddComponentTypesN&gt;;
-        <span class="hljs-keyword">using</span> RemoveComponentTypes = ListGetter_t&lt;RemoveComponentTag, RemoveComponentTypesN&gt;;
+        <span class="hljs-keyword">using</span> GetComponentTypes = ListGetter_t&lt;GetComponentTag, getComponentTypesN&gt;;
+        <span class="hljs-keyword">using</span> RemoveComponentTypes = ListGetter_t&lt;RemoveComponentTag, removeComponentTypesN&gt;;
     };
 };
 
 </div></code></pre>
-<p>Like before, the max indices for stateful typelist must be default template arguments, so the template instances can be different as new types are appended. <code>AddComponentTagType</code> and <code>RemoveComponentTagType</code> are there so that <code>AddComponentTypesN</code> and <code>RemoveComponentTypesN</code> depend on them. Otherwise, like with <code>MaxIndex</code>, Clang will reuse the previous default arguments, making <code>AddComponentTypesN</code> and <code>RemoveComponentTypesN</code> fail to update as the stateful typelists change.</p>
-<p>Having both <code>AddComponentTagType</code> and <code>RemoveComponentTagType</code> might seem excessive. Maybe we could just have <code>TemplateTrackerType</code>, and do something like this?</p>
+<p>Like before, the max indices for stateful typelist must be default template arguments, so the template instances can be different as new types are appended. <code>GetComponentTagType</code> and <code>RemoveComponentTagType</code> are there so that <code>getComponentTypesN</code> and <code>removeComponentTypesN</code> depend on them. Otherwise, like with <code>MaxIndex</code>, Clang will reuse the previous default arguments, making <code>getComponentTypesN</code> and <code>removeComponentTypesN</code> fail to update as the stateful typelists change.</p>
+<p>Having both <code>GetComponentTagType</code> and <code>removeComponentTagType</code> might seem excessive. Maybe we could just have <code>TemplateTrackerType</code>, and do something like this?</p>
 <pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;
     <span class="hljs-keyword">typename</span> TemplateTrackerType = TemplateTracker,
-    <span class="hljs-keyword">size_t</span> AddComponentTypesN = MaxIndex&lt;TemplateTracker::AddComponentTag&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;,
-    <span class="hljs-keyword">size_t</span> RemoveComponentTypesN = MaxIndex&lt;TemplateTracker::RemoveComponentTag&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;
+    <span class="hljs-keyword">size_t</span> getComponentTypesN = MaxIndex&lt;TemplateTracker::GetComponentTag&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;,
+    <span class="hljs-keyword">size_t</span> removeComponentTypesN = MaxIndex&lt;TemplateTracker::RemoveComponentTag&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;
 &gt;
 struct Info {<span class="hljs-comment">/*...*/</span>};
 </div></code></pre>
@@ -1090,83 +1063,72 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 <h2 id="using-the-template-tracker">Using the template tracker</h2>
 <p>So how should we use <code>TemplateTracker</code>? I prefer keeping all the template calls for a particular tracker in one function, as this makes it easy to know when to get the stateful typelist: after the function is declared. If possible, having that function be defined in a .cpp means there's no risk anyone can accidentally define the function twice and duplicate insertions.</p>
 <p>A consequence of this is that the compile-time type list is only available to that .cpp. If other code wants to know what types were being accessed, the tracking .cpp will have to convert the compile-time types to some kind of run-time information, like a type ID.</p>
-<pre class="hljs"><code><div><span class="hljs-comment">// ***dummy_system.h***</span>
-<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">DummySystem</span> {</span>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span> <span class="hljs-keyword">public</span> GameSystem {
     <span class="hljs-comment">// Templates will be tracked in the .cpp, but unavailable to anyone including the header.</span>
-    <span class="hljs-function"><span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span></span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
 
     <span class="hljs-comment">// Use functions to let the .cpp convert compile-time type info to run-time type info.</span>
-    <span class="hljs-function"><span class="hljs-keyword">static</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">GetAddedComponents</span><span class="hljs-params">()</span></span>;
-    <span class="hljs-function"><span class="hljs-keyword">static</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">GetRemovedComponents</span><span class="hljs-params">()</span></span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+
 };
 </div></code></pre>
 <p>For using the template tracker, we could just declare and use it in the function. This prevents the template tracker from even being exposed in the header.</p>
-<pre class="hljs"><code><div><span class="hljs-comment">// ***dummy_system.cpp***</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;type_traits&gt; // std::is_same</span></span>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.cpp***</span>
 
-<span class="hljs-keyword">namespace</span>{ <span class="hljs-keyword">using</span> Tracker = TemplateTracker&lt;DummySystem&gt;; }
+<span class="hljs-keyword">namespace</span>{ <span class="hljs-keyword">using</span> Tracker = TemplateTracker&lt;PhysicsSystem&gt;; }
 
-<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">DummySystem::Act</span><span class="hljs-params">()</span> </span>{
-    <span class="hljs-keyword">const</span> <span class="hljs-keyword">size_t</span> entityId = <span class="hljs-number">1</span>;
-    Tracker::AddComponent(entityId, <span class="hljs-literal">true</span>);
-    Tracker::AddComponent(entityId, <span class="hljs-string">'a'</span>);
-    Tracker::AddComponent(entityId, <span class="hljs-number">1</span>);
-    Tracker::AddComponent(entityId, <span class="hljs-number">1.f</span>);
-    Tracker::AddComponent(entityId, <span class="hljs-number">1.0</span>);
-    Tracker::RemoveComponent&lt;<span class="hljs-keyword">float</span>&gt;(entityId);
-    Tracker::RemoveComponent&lt;<span class="hljs-keyword">double</span>&gt;(entityId);
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">PhysicsSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetPhysicsEntities()) {
+        <span class="hljs-keyword">const</span> Velocity&amp; velocity = Tracker::GetComponent&lt;<span class="hljs-keyword">const</span> Velocity&gt;(id);
+        Position&amp; <span class="hljs-built_in">position</span> = Tracker::GetComponent&lt;Position&gt;(id);
+        <span class="hljs-built_in">position</span> += velocity;
+    }
 }
 
 <span class="hljs-comment">// Compile-time info on which types were used with each function.</span>
 <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;
-    Tracker::Info&lt;&gt;::AddComponentTypes,
-    Typelist&lt;<span class="hljs-keyword">bool</span>, <span class="hljs-keyword">char</span>, <span class="hljs-keyword">int</span>, <span class="hljs-keyword">float</span>, <span class="hljs-keyword">double</span>&gt;
+    Tracker::Info&lt;&gt;::GetComponentTypes,
+    Typelist&lt;<span class="hljs-keyword">const</span> Velocity, Position&gt;
 &gt;::value, <span class="hljs-string">""</span>);
-<span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;Tracker::Info&lt;&gt;::RemoveComponentTypes, Typelist&lt;<span class="hljs-keyword">float</span>, <span class="hljs-keyword">double</span>&gt;&gt;::value, <span class="hljs-string">""</span>);
 
-<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">DummySystem::GetAddedComponents</span><span class="hljs-params">()</span> </span>{
-    <span class="hljs-comment">// Outputs {"bool", "char", "int", "float", "double"}.</span>
-    <span class="hljs-keyword">return</span> GetTypeNames(Tracker::Info&lt;&gt;::AddComponentTypes{});
-}
-
-<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">DummySystem::GetRemovedComponents</span><span class="hljs-params">()</span> </span>{
-    <span class="hljs-comment">// Outputs {"float", "double"}.</span>
-    <span class="hljs-keyword">return</span> GetTypeNames(Tracker::Info&lt;&gt;::RemoveComponentTypes{});
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">PhysicsSystem::GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-comment">// Outputs vector with Velocity and Position type IDs.</span>
+    <span class="hljs-keyword">return</span> GetTypeIDs(Info&lt;&gt;::GetComponentTypes{});
 }
 </div></code></pre>
-<p>Alternatively, we could inherit <code>DummySystem</code> from <code>TemplateTracker</code>. This has the advantage of making the class declaration be the only place that considers the template tracker. Everywhere else, the code being used looks like regular function templates and type aliases. Protected inheritance would stop any code outside of <code>DummySystem</code> from accessing the stateful typelist.</p>
-<pre class="hljs"><code><div><span class="hljs-comment">// ***dummy_system.h***</span>
-<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">DummySystem</span> :</span> <span class="hljs-keyword">protected</span> TemplateTracker&lt;DummySystem&gt; {
+<p>Alternatively, we could inherit <code>PhysicsSystem</code> from <code>TemplateTracker</code>. This has the advantage of making the class declaration be the only place that considers the template tracker. Everywhere else, the code being used looks like regular function templates and type aliases. Protected inheritance would stop any code outside of <code>PhysicsSystem</code> from accessing the stateful typelist.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span>
+    <span class="hljs-keyword">public</span> GameSystem,
+    <span class="hljs-keyword">protected</span> TemplateTracker&lt;PhysicsSystem&gt; <span class="hljs-comment">// Added inheritance</span>
+{
     <span class="hljs-comment">// ...</span>
 
     <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Check</span><span class="hljs-params">()</span></span>;
 };
 
-<span class="hljs-comment">// ***dummy_system.cpp***</span>
-<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">DummySystem::Act</span><span class="hljs-params">()</span> </span>{
-    <span class="hljs-keyword">const</span> <span class="hljs-keyword">size_t</span> entityId = <span class="hljs-number">1</span>;
-    AddComponent(entityId, <span class="hljs-literal">true</span>);
-    AddComponent(entityId, <span class="hljs-string">'a'</span>);
-    AddComponent(entityId, <span class="hljs-number">1</span>);
-    AddComponent(entityId, <span class="hljs-number">1.f</span>);
-    AddComponent(entityId, <span class="hljs-number">1.0</span>);
-    RemoveComponent&lt;<span class="hljs-keyword">float</span>&gt;(entityId);
-    RemoveComponent&lt;<span class="hljs-keyword">double</span>&gt;(entityId);
+<span class="hljs-comment">// ***physics_system.cpp***</span>
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">PhysicsSystem::Act</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetPhysicsEntities()) {
+        <span class="hljs-keyword">const</span> Velocity&amp; velocity = GetComponent&lt;<span class="hljs-keyword">const</span> Velocity&gt;(id);
+        Position&amp; <span class="hljs-built_in">position</span> = GetComponent&lt;Position&gt;(id);
+        <span class="hljs-built_in">position</span> += velocity;
+    }
 }
 
-<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">DummySystem::GetAddedComponents</span><span class="hljs-params">()</span> </span>{
-    <span class="hljs-keyword">return</span> GetTypeNames(Info&lt;&gt;::AddComponentTypes{});
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">PhysicsSystem::GetAddedComponents</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">return</span> GetTypeNames(Info&lt;&gt;::GetComponentTypes{});
 }
 
 <span class="hljs-comment">// ...</span>
 
-<span class="hljs-comment">// Can only use DummySystem::Info&lt;&gt; from within DummySystem or friends now.</span>
+<span class="hljs-comment">// Can only use PhysicsSystem::Info&lt;&gt; from within PhysicsSystem or friends now.</span>
 <span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">Check</span><span class="hljs-params">()</span> </span>{
     <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;
-        DummySystem::Info&lt;&gt;::AddComponentTypes,
-        Typelist&lt;<span class="hljs-keyword">bool</span>, <span class="hljs-keyword">char</span>, <span class="hljs-keyword">int</span>, <span class="hljs-keyword">float</span>, <span class="hljs-keyword">double</span>&gt;
+        PhysicsSystem::Info&lt;&gt;::GetComponentTypes,
+        Typelist&lt;<span class="hljs-keyword">const</span> Velocity, Position&gt;
     &gt;::value, <span class="hljs-string">""</span>);
-    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;DummySystem::Info&lt;&gt;::RemoveComponentTypes, Typelist&lt;<span class="hljs-keyword">float</span>, <span class="hljs-keyword">double</span>&gt;&gt;::value, <span class="hljs-string">""</span>);
 }
 </div></code></pre>
 <h2 id="risks">Risks</h2>
@@ -1175,14 +1137,19 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 <li>I am not an expert on the standard. It's possible that I missed some detail on this section that makes this code Ill-Formed, No Diagnostics Required (IFNDR). If I have missed some detail in the standard that makes this code ill-formed, <em>please</em> let me know, as I'd love to at least warn people, or at best find a solution that's well-formed.</li>
 <li>The C++ Core Working Group proposed finding a way to make friend injection ill-formed in <a href="https://cplusplus.github.io/CWG/issues/2118.html">issue 2118</a>. This issue was raised over 9 years ago in 2015, and as far as I know, nothing new has changed.</li>
 <li>These techniques, even if well-formed, rely on some uncommon styles of metaprogramming. Compilers had bugs as recently as 3 years ago that stopped this code from compiling. Techniques this niche are more likely to break from compilers introducing a regression, and these regressions are less likely to have fixes prioritized since they affect fewer people.</li>
+<li>It's not to hard to avoid calling tracked templates or access <code>TemplateTracker::Info&lt;&gt;</code> in headers. However, if a new engineer isn't aware of these rules, it's easy for them to do so accidentally. Worse, since some misuses of <code>TemplateTracker</code> result in Ill-Formed, No Diagnostics Needed (IFNDR) programs, it's possible for a new dev to sneak in ill-formed code without anyone realizing.</li>
 </ul>
-<p>The most specific advice I can give would be to consider if you will need to support newer compiler versions. If you will, consider what your exit plan would be if a compiler regression or standards change causes the template tracker to break. From there, weigh if that's worth the benefit of having a template tracker in the first place.</p>
+<p>The most specific advice I can give would be:</p>
+<ul>
+<li>Consider if you will need to support newer compiler versions. If you will, consider what your exit plan would be if a compiler regression or standards change causes the template tracker to break. From there, weigh if that's worth the benefit of having a template tracker in the first place.</li>
+<li>Consider how you will prevent people from misusing <code>TemplateTracker</code>. If you don't have a good option, it may be too risky.</li>
+</ul>
 <h2 id="references-and-thanks">References and thanks</h2>
 <ul>
 <li>Thanks to James Beaumont-Field, Spencer Miller, and Ted Rivera for checking this article is technically sound.</li>
 <li>Thanks to Olivia Alegria for editing this article.</li>
 <li>Thanks to Filip Roséen for his series on &quot;<a href="https://b.atch.se/posts/non-constant-constant-expressions/">Non-constant constant-expressions in C++</a>&quot;, which was my introduction to stateful metaprogramming.</li>
-<li>Thanks to Reece Jones for his article &quot;<a href="https://mc-deltat.github.io/articles/stateful-metaprogramming-cpp20">Revisiting Stateful Metaprogramming in C++20</a>&quot;. Even though I didn't end up using C++20, I don't think I would have had the courage to try C++14 if I didn't have his working solution to start from.</li>
+<li>Thanks to Kris Jusiak for his C++20 <a href="https://news.ycombinator.com/item?id=39166067">compile-time type list</a>. Even though I didn't end up using C++20, I don't think I would have had the courage to try C++14 if I didn't have his working solution to start from.</li>
 <li>Thank you so much for reading through this article; I really hope it benefited you. If you looked at the code and had any questions, found any problems, or came up with a better way to do anything, please let me know--I'd love to talk about it or maybe improve this article.</li>
 </ul>
 <p>Thanks again!</p>
@@ -1198,15 +1165,16 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
     }
 };
 
+<span class="hljs-meta">#<span class="hljs-meta-keyword">ifdef</span> _MSC_VER</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( push )</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( disable : 4514 ) <span class="hljs-comment">// Unreferenced inline function</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
+
 <span class="hljs-meta">#<span class="hljs-meta-keyword">if</span> defined(__GNUC__) &amp;&amp; !defined(__clang__)</span>
 <span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> GCC diagnostic push</span>
 <span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> GCC diagnostic ignored <span class="hljs-meta-string">"-Wnon-template-friend"</span></span>
 <span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
 
-<span class="hljs-meta">#<span class="hljs-meta-keyword">ifdef</span> _MSC_VER</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( push )</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( disable : 4514 ) <span class="hljs-comment">// Unreferenced inline function</span></span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
 
 <span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
 <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Index</span> {</span>
@@ -1220,13 +1188,11 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
     }
 };
 
-<span class="hljs-meta">#<span class="hljs-meta-keyword">ifdef</span> _MSC_VER</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( pop )</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
 
 <span class="hljs-meta">#<span class="hljs-meta-keyword">if</span> defined(__GNUC__) &amp;&amp; !defined(__clang__)</span>
 <span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> GCC diagnostic pop</span>
 <span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
+
 
 <span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">bool</span> <span class="hljs-title">IndexIsSet</span><span class="hljs-params">(...)</span> </span>{
     <span class="hljs-keyword">return</span> <span class="hljs-literal">false</span>;
@@ -1236,6 +1202,10 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 <span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">IndexIsSet</span><span class="hljs-params">(IndexType)</span> -&gt; <span class="hljs-title">decltype</span><span class="hljs-params">(GetType(IndexType{}), <span class="hljs-keyword">bool</span>{})</span> </span>{
     <span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>;
 }
+
+<span class="hljs-meta">#<span class="hljs-meta-keyword">ifdef</span> _MSC_VER</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( pop )</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
 
 <span class="hljs-keyword">template</span>&lt;
     <span class="hljs-keyword">typename</span> Tag,
@@ -1283,12 +1253,15 @@ struct ListGetter {
 <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Identifier&gt;
 <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TemplateTracker</span> {</span>
 <span class="hljs-keyword">private</span>:
-    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">AddComponentTag</span>;</span>
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GetComponentTag</span>;</span>
     <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">RemoveComponentTag</span>;</span>
 
 <span class="hljs-keyword">public</span>:
-    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Component, <span class="hljs-keyword">typename</span> = <span class="hljs-keyword">decltype</span>(AddType&lt;AddComponentTag, Component&gt;())&gt;
-    <span class="hljs-keyword">static</span> <span class="hljs-keyword">const</span> Component&amp; AddComponent(<span class="hljs-keyword">size_t</span> <span class="hljs-comment">/*entityIndex*/</span>, <span class="hljs-keyword">const</span> Component&amp; component) {
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Component, <span class="hljs-keyword">typename</span> = <span class="hljs-keyword">decltype</span>(AddType&lt;GetComponentTag, Component&gt;())&gt;
+    <span class="hljs-keyword">static</span> Component&amp; GetComponent(<span class="hljs-keyword">size_t</span> <span class="hljs-comment">/*entityIndex*/</span>)
+    {
+        <span class="hljs-comment">// Return a dummy component to illustrate example.</span>
+        <span class="hljs-keyword">static</span> Component component;
         <span class="hljs-keyword">return</span> component;
     }
 
@@ -1296,98 +1269,199 @@ struct ListGetter {
     <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> RemoveComponent(<span class="hljs-keyword">size_t</span> <span class="hljs-comment">/*entityIndex*/</span>) {}
 
     <span class="hljs-keyword">template</span> &lt;
-        <span class="hljs-keyword">typename</span> AddComponentTagType = AddComponentTag,
+        <span class="hljs-keyword">typename</span> GetComponentTagType = GetComponentTag,
         <span class="hljs-keyword">typename</span> RemoveComponentTagType = RemoveComponentTag,
-        <span class="hljs-keyword">size_t</span> addComponentTypesN = MaxIndex&lt;AddComponentTagType&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;,
+        <span class="hljs-keyword">size_t</span> getComponentTypesN = MaxIndex&lt;GetComponentTagType&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;,
         <span class="hljs-keyword">size_t</span> removeComponentTypesN = MaxIndex&lt;RemoveComponentTagType&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;
     &gt;
     struct Info {
-        <span class="hljs-keyword">using</span> AddComponentTypes = ListGetter_t&lt;AddComponentTag, addComponentTypesN&gt;;
+        <span class="hljs-keyword">using</span> GetComponentTypes = ListGetter_t&lt;GetComponentTag, getComponentTypesN&gt;;
         <span class="hljs-keyword">using</span> RemoveComponentTypes = ListGetter_t&lt;RemoveComponentTag, removeComponentTypesN&gt;;
     };
 };
 
-<span class="hljs-comment">// ***type_utility.h***</span>
+<span class="hljs-comment">// ***misc.h***</span>
 <span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;vector&gt;</span></span>
 
-<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> T&gt;
-<span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* name = <span class="hljs-string">"unknown"</span>;
-<span class="hljs-keyword">template</span> &lt;&gt;
-<span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* name&lt;<span class="hljs-keyword">bool</span>&gt; = <span class="hljs-string">"bool"</span>;
-<span class="hljs-keyword">template</span> &lt;&gt;
-<span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* name&lt;<span class="hljs-keyword">char</span>&gt; = <span class="hljs-string">"char"</span>;
-<span class="hljs-keyword">template</span> &lt;&gt;
-<span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* name&lt;<span class="hljs-keyword">int</span>&gt; = <span class="hljs-string">"int"</span>;
-<span class="hljs-keyword">template</span> &lt;&gt;
-<span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* name&lt;<span class="hljs-keyword">float</span>&gt; = <span class="hljs-string">"float"</span>;
-<span class="hljs-keyword">template</span> &lt;&gt;
-<span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* name&lt;<span class="hljs-keyword">double</span>&gt; = <span class="hljs-string">"double"</span>;
+<span class="hljs-comment">// Dummy structs and operators.</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Velocity</span> {</span>};
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Position</span> {</span>};
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Mesh</span> {</span>};
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Damage</span> {</span>};
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">HitPoints</span> {</span>};
+Position&amp; <span class="hljs-keyword">operator</span> += (Position&amp; lhs, <span class="hljs-keyword">const</span> Velocity&amp;) { <span class="hljs-keyword">return</span> lhs; }
+HitPoints&amp; <span class="hljs-keyword">operator</span> -= (HitPoints&amp; lhs, <span class="hljs-keyword">const</span> Damage&amp;) { <span class="hljs-keyword">return</span> lhs; }
 
-<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span>... Ts&gt;
-<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">GetTypeNames</span><span class="hljs-params">(Typelist&lt;Ts...&gt;)</span> </span>{
-    <span class="hljs-keyword">return</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt;{name&lt;Ts&gt;...};
+<span class="hljs-comment">// Dummy functions for getting entity IDs.</span>
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt; <span class="hljs-title">GetPhysicsEntities</span><span class="hljs-params">()</span>
+</span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt;{<span class="hljs-number">0</span>, <span class="hljs-number">1</span>, <span class="hljs-number">2</span>};
+}
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt; <span class="hljs-title">GetGraphicsEntities</span><span class="hljs-params">()</span>
+</span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt;{<span class="hljs-number">0</span>, <span class="hljs-number">1</span>, <span class="hljs-number">2</span>};
+}
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt; <span class="hljs-title">GetHealthEntities</span><span class="hljs-params">()</span>
+</span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt;{<span class="hljs-number">0</span>, <span class="hljs-number">1</span>, <span class="hljs-number">2</span>};
 }
 
-<span class="hljs-comment">// ***dummy_system.h***</span>
-<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">DummySystem</span> :</span> <span class="hljs-keyword">protected</span> TemplateTracker&lt;DummySystem&gt;
+<span class="hljs-comment">// Dummy global functions.</span>
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">Render</span><span class="hljs-params">(<span class="hljs-keyword">const</span> Position&amp;, <span class="hljs-keyword">const</span> Mesh&amp;)</span> </span>{}
+
+<span class="hljs-keyword">enum</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ID</span> :</span> <span class="hljs-keyword">size_t</span>
 {
-    <span class="hljs-function"><span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span></span>;
-    <span class="hljs-function"><span class="hljs-keyword">static</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">GetAddedComponents</span><span class="hljs-params">()</span></span>;
-    <span class="hljs-function"><span class="hljs-keyword">static</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">GetRemovedComponents</span><span class="hljs-params">()</span></span>;
-    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Check</span><span class="hljs-params">()</span></span>;
+    UNKNOWN = <span class="hljs-number">0</span>,
+    VELOCITY,
+    POSITION,
+    MESH,
+    DAMAGE,
+    HITPOINTS
 };
 
-<span class="hljs-comment">// ***dummy_system.cpp***</span>
-<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;type_traits&gt; // std::is_same</span></span>
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID = ID::UNKNOWN;
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID&lt;<span class="hljs-keyword">const</span> T&gt; = TypeID&lt;T&gt;;
+<span class="hljs-keyword">template</span> &lt;&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID&lt;Velocity&gt; = ID::VELOCITY;
+<span class="hljs-keyword">template</span> &lt;&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID&lt;Position&gt; = ID::POSITION;
+<span class="hljs-keyword">template</span> &lt;&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID&lt;Damage&gt; = ID::DAMAGE;
+<span class="hljs-keyword">template</span> &lt;&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID&lt;HitPoints&gt; = ID::HITPOINTS;
 
-<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">DummySystem::Act</span><span class="hljs-params">()</span>
-</span>{
-    <span class="hljs-keyword">const</span> <span class="hljs-keyword">size_t</span> entityId = <span class="hljs-number">1</span>;
-    AddComponent(entityId, <span class="hljs-literal">true</span>);
-    AddComponent(entityId, <span class="hljs-string">'a'</span>);
-    AddComponent(entityId, <span class="hljs-number">1</span>);
-    AddComponent(entityId, <span class="hljs-number">1.f</span>);
-    AddComponent(entityId, <span class="hljs-number">1.0</span>);
-    RemoveComponent&lt;<span class="hljs-keyword">float</span>&gt;(entityId);
-    RemoveComponent&lt;<span class="hljs-keyword">double</span>&gt;(entityId);
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span>... Ts&gt;
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetTypeIDs</span><span class="hljs-params">(Typelist&lt;Ts...&gt;)</span> </span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt;{ TypeID&lt;Ts&gt;... };
 }
 
-<span class="hljs-comment">// Dependent systems can use run-time info to avoid having to be recompiled as info changes.</span>
-<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">DummySystem::GetAddedComponents</span><span class="hljs-params">()</span>
+<span class="hljs-comment">// ***game_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GameSystem</span>
+{</span>
+    <span class="hljs-keyword">virtual</span> ~GameSystem() = <span class="hljs-keyword">default</span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* <span class="hljs-title">GetName</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>= <span class="hljs-number">0</span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>= <span class="hljs-number">0</span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>= <span class="hljs-number">0</span>;
+};
+
+<span class="hljs-comment">// ***physics_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span> <span class="hljs-keyword">public</span> GameSystem, <span class="hljs-keyword">protected</span> TemplateTracker&lt;PhysicsSystem&gt;
+{
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* <span class="hljs-title">GetName</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span> </span>{ <span class="hljs-keyword">return</span> <span class="hljs-string">"physics"</span>; }
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+};
+
+<span class="hljs-comment">// ***physics_system.cpp***</span>
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">PhysicsSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
 </span>{
-    <span class="hljs-comment">// Outputs {"bool", "char", "int", "float", "double"}.</span>
-    <span class="hljs-keyword">return</span> GetTypeNames(Info&lt;&gt;::AddComponentTypes{});
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetPhysicsEntities())
+    {
+        <span class="hljs-keyword">const</span> Velocity&amp; velocity = GetComponent&lt;<span class="hljs-keyword">const</span> Velocity&gt;(id);
+        Position&amp; <span class="hljs-built_in">position</span> = GetComponent&lt;Position&gt;(id);
+        <span class="hljs-built_in">position</span> += velocity;
+    }
 }
 
-<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">DummySystem::GetRemovedComponents</span><span class="hljs-params">()</span>
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">PhysicsSystem::GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
 </span>{
-    <span class="hljs-comment">// Outputs {"float", "double"}.</span>
-    <span class="hljs-keyword">return</span> GetTypeNames(Info&lt;&gt;::RemoveComponentTypes{});
+    <span class="hljs-comment">// TUs that call GetComponent() have compile-time info that lists all instances called.</span>
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;Info&lt;&gt;::GetComponentTypes, Typelist&lt;<span class="hljs-keyword">const</span> Velocity, Position&gt;&gt;::value, <span class="hljs-string">""</span>);
+ 
+    <span class="hljs-comment">// Run-time info can be returned for other TUs to use.</span>
+    <span class="hljs-keyword">return</span> GetTypeIDs(Info&lt;&gt;::GetComponentTypes{});
 }
 
-<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">Check</span><span class="hljs-params">()</span>
+<span class="hljs-comment">// ***graphics_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GraphicsSystem</span> :</span> <span class="hljs-keyword">public</span> GameSystem, <span class="hljs-keyword">protected</span> TemplateTracker&lt;GraphicsSystem&gt;
+{
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* <span class="hljs-title">GetName</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span> </span>{ <span class="hljs-keyword">return</span> <span class="hljs-string">"graphics"</span>; }
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+};
+
+<span class="hljs-comment">// ***graphics_system.cpp***</span>
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GraphicsSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
 </span>{
-    <span class="hljs-comment">// Compile-time info on which types were used with each function.</span>
-    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;DummySystem::Info&lt;&gt;::AddComponentTypes, Typelist&lt;<span class="hljs-keyword">bool</span>, <span class="hljs-keyword">char</span>, <span class="hljs-keyword">int</span>, <span class="hljs-keyword">float</span>, <span class="hljs-keyword">double</span>&gt;&gt;::value, <span class="hljs-string">""</span>);
-    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;DummySystem::Info&lt;&gt;::RemoveComponentTypes, Typelist&lt;<span class="hljs-keyword">float</span>, <span class="hljs-keyword">double</span>&gt;&gt;::value, <span class="hljs-string">""</span>);
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetGraphicsEntities())
+    {
+        Render(
+            GetComponent&lt;<span class="hljs-keyword">const</span> Position&gt;(id),
+            GetComponent&lt;<span class="hljs-keyword">const</span> Mesh&gt;(id)
+        );
+    }
+}
+
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GraphicsSystem::GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
+</span>{
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;Info&lt;&gt;::GetComponentTypes, Typelist&lt;<span class="hljs-keyword">const</span> Position, <span class="hljs-keyword">const</span> Mesh&gt;&gt;::value, <span class="hljs-string">""</span>);
+    <span class="hljs-keyword">return</span> GetTypeIDs(Info&lt;&gt;::GetComponentTypes{});
+}
+
+<span class="hljs-comment">// ***health_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">HealthSystem</span> :</span> <span class="hljs-keyword">public</span> GameSystem, <span class="hljs-keyword">protected</span> TemplateTracker&lt;HealthSystem&gt;
+{
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* <span class="hljs-title">GetName</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span> </span>{ <span class="hljs-keyword">return</span> <span class="hljs-string">"health"</span>; }
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+};
+
+<span class="hljs-comment">// ***health_system.cpp***</span>
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">HealthSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
+</span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetHealthEntities())
+    {
+        HitPoints&amp; hitPoints = GetComponent&lt;HitPoints&gt;(id);
+        <span class="hljs-keyword">const</span> Damage&amp; damage = GetComponent&lt;<span class="hljs-keyword">const</span> Damage&gt;(id);
+        hitPoints -= damage;
+        RemoveComponent&lt;Damage&gt;(id);
+    }
+}
+
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">HealthSystem::GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
+</span>{
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;Info&lt;&gt;::GetComponentTypes, Typelist&lt;HitPoints, <span class="hljs-keyword">const</span> Damage&gt;&gt;::value, <span class="hljs-string">""</span>);
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;Info&lt;&gt;::RemoveComponentTypes, Typelist&lt;Damage&gt;&gt;::value, <span class="hljs-string">""</span>);
+    <span class="hljs-keyword">return</span> GetTypeIDs(Info&lt;&gt;::GetComponentTypes{});
 }
 
 <span class="hljs-comment">// ***main.cpp***</span>
 <span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;iostream&gt;</span></span>
 
+<span class="hljs-function"><span class="hljs-keyword">bool</span> <span class="hljs-title">SystemsShareResources</span><span class="hljs-params">(<span class="hljs-keyword">const</span> GameSystem&amp; system1, <span class="hljs-keyword">const</span> GameSystem&amp; system2)</span>
+</span>{
+    <span class="hljs-comment">// Quick-and-dirty overlap check.</span>
+    <span class="hljs-keyword">for</span>(ID id1 : system1.GetAccessedTypeIDs())
+    {
+        <span class="hljs-keyword">for</span> (ID id2 : system2.GetAccessedTypeIDs())
+        {
+            <span class="hljs-keyword">if</span>(id1 == id2)
+            {
+                <span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>;
+            }
+        }
+    }
+    <span class="hljs-keyword">return</span> <span class="hljs-literal">false</span>;
+}
+
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">PrintSystemOverlapState</span><span class="hljs-params">(<span class="hljs-keyword">const</span> GameSystem&amp; system1, <span class="hljs-keyword">const</span> GameSystem&amp; system2)</span>
+</span>{
+    <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* result = SystemsShareResources(system1, system2) ? <span class="hljs-string">" CANNOT"</span> : <span class="hljs-string">" CAN"</span>;
+    <span class="hljs-built_in">std</span>::<span class="hljs-built_in">cout</span> &lt;&lt; system1.GetName() &lt;&lt; <span class="hljs-string">" and "</span> &lt;&lt; system2.GetName() &lt;&lt; result &lt;&lt; <span class="hljs-string">" call Act() at the same time."</span> &lt;&lt; <span class="hljs-built_in">std</span>::<span class="hljs-built_in">endl</span>;
+}
+
 <span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">()</span>
 </span>{
-    <span class="hljs-built_in">std</span>::<span class="hljs-built_in">cout</span> &lt;&lt; <span class="hljs-string">"Added Components:"</span> &lt;&lt; <span class="hljs-built_in">std</span>::<span class="hljs-built_in">endl</span>;
-    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* currName : DummySystem::GetAddedComponents())
-    {
-        <span class="hljs-built_in">std</span>::<span class="hljs-built_in">cout</span> &lt;&lt; <span class="hljs-string">" - "</span> &lt;&lt; currName &lt;&lt; <span class="hljs-built_in">std</span>::<span class="hljs-built_in">endl</span>;
-    }
-
-    <span class="hljs-built_in">std</span>::<span class="hljs-built_in">cout</span> &lt;&lt; <span class="hljs-string">"Removed Components:"</span> &lt;&lt; <span class="hljs-built_in">std</span>::<span class="hljs-built_in">endl</span>;
-    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* currName : DummySystem::GetRemovedComponents())
-    {
-        <span class="hljs-built_in">std</span>::<span class="hljs-built_in">cout</span> &lt;&lt; <span class="hljs-string">" - "</span> &lt;&lt; currName &lt;&lt; <span class="hljs-built_in">std</span>::<span class="hljs-built_in">endl</span>;
-    }
+    PhysicsSystem physicsSystem;
+    GraphicsSystem graphicsSystem;
+    HealthSystem healthSystem;
+    
+    <span class="hljs-comment">// Runtime checks for TUs that don't observe calls to GetComponent().</span>
+    PrintSystemOverlapState(physicsSystem, graphicsSystem);
+    PrintSystemOverlapState(physicsSystem, healthSystem);
+    PrintSystemOverlapState(healthSystem, graphicsSystem);
 }
 
 </div></code></pre>
