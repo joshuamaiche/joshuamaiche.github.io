@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>article.md</title>
+<title>Look Ma: No Codegen! Tracking Templates at Compile-Time Using Pure C++14</title>
 <meta http-equiv="Content-type" content="text/html;charset=UTF-8">
 
 <style>
@@ -365,9 +365,49 @@ code {
           : 'default'
     });
   </script>
-<h1 id="look-ma-no-codegen-tracking-templates-at-compile-time-using-pure-c14">Look Ma: No Codegen! Tracking Templates at Compile-Time Using Pure C++14</h1>
-<h2 id="table-of-contents">Table of Contents</h2>
-<h2 id="intro">Intro</h2>
+<h1 id="look-ma%3A-no-codegen!-tracking-templates-at-compile-time-using-pure-c%2B%2B14" tabindex="-1" id="look-ma-no-codegen-tracking-templates-at-compile-time-using-pure-c14">Look Ma: No Codegen! Tracking Templates at Compile-Time Using Pure C++14</h1>
+<p>2024.10.24</p>
+<h2 id="contents" tabindex="-1" id="contents">Contents</h2>
+<ul>
+<li><a href="#0">Intro</a></li>
+<li><a href="#1">Part 0: Typelist</a></li>
+<li><a href="#2">Part 1: TypeSetter</a>
+<ul>
+<li><a href="#2_0">Adding global names from inside a function</a></li>
+<li><a href="#2_1">Tracking global types from inside a function</a></li>
+<li><a href="#2_2">Tracking multiple types</a></li>
+<li><a href="#2_3">Polishing off the friend injection classes</a></li>
+</ul>
+</li>
+<li><a href="#3">Part 2: IndexIsSet</a></li>
+<li><a href="#4">Part 3: GetMaxIndex</a>
+<ul>
+<li><a href="#4_0">Finding the next available index</a></li>
+<li><a href="#4_1">Obstacle 1: The recursion must use new instances</a></li>
+<li><a href="#4_2">Obstacle 2: The recursion must to be accessible</a></li>
+<li><a href="#4_3">Obstacle 3: The recursion must be terminatable</a></li>
+<li><a href="#4_4">Home stretch: Applying it to MaxIndex</a></li>
+</ul>
+</li>
+<li><a href="#5">Part 4: AddType / ListGetter</a>
+<ul>
+<li><a href="#5_0">Appending to the stateful typelist</a></li>
+<li><a href="#5_1">Reading the stateful typelist</a></li>
+</ul>
+</li>
+<li><a href="#6">Part 5: TemplateTracker</a></li>
+<li><a href="#7">TemplateTracker in action</a>
+<ul>
+<li><a href="#7_0">Using TemplateTracker</a></li>
+<li><a href="#7_1">Pitfalls</a></li>
+<li><a href="#7_2">Risks</a></li>
+</ul>
+</li>
+<li><a href="#8">References and thanks</a></li>
+<li><a href="#9">Full Implementation</a></li>
+</ul>
+<p><a name="0"></a></p>
+<h2 id="intro" tabindex="-1" id="intro">Intro</h2>
 <p>I was working on my game engine, and I had a number of systems with <code>Act()</code> functions that would be called as the game ran.</p>
 <pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GameSystem</span> {</span> <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span></span>; };
 <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span> GameSystem { <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span></span>; }
@@ -412,7 +452,7 @@ code {
 }
 </div></code></pre>
 <p>I wanted to be able to run these systems in parallel, without the systems worrying about synchronizing data access. Without any guards in place, data races could easily happen.</p>
-<img src="http://www.plantuml.com/plantuml/svg/XLDDQuGm4BtFhvZQOrceXfLbjvGS5kfHbj9xQePDgCPY8dGf_U-DrMXQ5teGpBoFcPTHRfteND_K04fBGgSRseWFRQ5gJQKjOVAiEX8IqmI5nV6Ghj0iGhCLoYAKmQbzxQt3eWnlHz68CuLJsLhjT6l2-ONgjjBk0i3leIXHM-nDRqd2g8iAGHgLWZeg0KzXoZ5KItMnkh8pawVui7b4dkD-XVsun9q2cKNaNrEC3REfOJRK2XArKo7AG2XAdeq-sts0et1Brfc6CmyucypPG7xgnBlwEqKYXHFOYOgIPNAsYebtYrpfiwhzuv2XQp77srARjqEj3UrF9Bte63pHDmckDtwURHpsqtzMaipNFvi3diSxcLMhkxooppbHFYRQ-U7c7C1tyVLSDmupa97-L_W6" alt="uml diagram">
+<img src="http://www.plantuml.com/plantuml/svg/ZLF1JiCm3BtxAqmveacqqQff89J397Qi9iGzDD5YqIMeIIKcnB-JqYKBwmuSSl3pyxDVd73dHU-7GmUWIIhqT50ByKaEMcjQSWgB5zqh8R4iK3YSWdAMhR9iDSkoBCjWPzy6vt5Blh5al8l0HXp4NiMeiOuyMHFZLzNPblmHWDz3gaLoE9Z1AGbJUGP4XGoA8Xa4l8IJgn5jzD5HwnAJb_YuU49UutgM-rN9EqKooyX_ffWQLgU6rOXjbUYyld0qyXB2gqbrkOxapEhPUQ9XuW5dfrPi93_tuaDVpbH8uGNsebN5sGURcSQxSxcclUx2ySZGMwpnjY7p_j2HKUkTag5e4pKnD8cgDs6UPMxzApmvgSpt_zO9lCuNbOfd5tnboSbOFHbRXHcJ7U2h_9Qk2ySPb97Xj_m0" alt="uml diagram">
 <p>I realized I could safely run systems in parallel if I knew all the data each of these systems would touch. The question was, how could I track this? I started with a gatekeeper system, where I could specify the types used ahead of time, and validate at compile time that only the specified types were used:</p>
 <pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span> AllowedTypes&lt;<span class="hljs-keyword">const</span> Velocity, Position&gt;;
 </div></code></pre>
@@ -491,7 +531,8 @@ code {
 <li>Personally, I find it easier to work through practical examples.</li>
 </ul>
 <p>This implementation supports C++14 or later. MSVC 16.3+ is supported with <code>/W4 /WX</code> flags. Clang 12+ and GCC 7+ are supported with <code>-Wall -Wextra -pedantic -Werror</code> flags.</p>
-<h2 id="basic-setup">Basic setup</h2>
+<p><a name="1"></a></p>
+<h2 id="part-0%3A-typelist" tabindex="-1" id="part-0-typelist">Part 0: Typelist</h2>
 <p>Before we can automatically track types, we need a way to represent types. I'll be using a simple typelist implementation. Any implementation will do, as long as it does the following:</p>
 <ul>
 <li>Typelists can be appended. We have to do this since we're building up the typelist with each new tracked template instantiation.</li>
@@ -517,7 +558,10 @@ code {
     &gt; ::value, <span class="hljs-string">""</span>
 );
 </div></code></pre>
-<h2 id="adding-global-names-from-inside-a-function">Adding global names from inside a function</h2>
+<p><a name="2"></a></p>
+<h2 id="part-1%3A-typesetter" tabindex="-1" id="part-1-typesetter">Part 1: TypeSetter</h2>
+<p><a name="2_0"></a></p>
+<h3 id="adding-global-names-from-inside-a-function" tabindex="-1" id="adding-global-names-from-inside-a-function">Adding global names from inside a function</h3>
 <p>The first challenge we face is sharing compile-time information between two different functions. Let's start with a simple setup. We have a header file declaring a runtime setter and checker and a source file implementing them. How can we edit the bodies of these functions so <code>SetterFunction()</code> can create a compile-time bool and <code>GetterFunction()</code> can read it?</p>
 <pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">SetterFunction</span><span class="hljs-params">()</span> </span>{
   <span class="hljs-comment">// set bool here</span>
@@ -569,7 +613,8 @@ Within a function, any constexpr bools, classes, or lambdas won't be accessible 
     <span class="hljs-keyword">static_assert</span>(GetBool() == <span class="hljs-literal">true</span>, <span class="hljs-string">""</span>);
 }
 </div></code></pre>
-<h2 id="tracking-global-types-from-inside-a-function">Tracking global types from inside a function</h2>
+<p><a name="2_1"></a></p>
+<h3 id="tracking-global-types-from-inside-a-function" tabindex="-1" id="tracking-global-types-from-inside-a-function">Tracking global types from inside a function</h3>
 <p>Bringing this back to type information, we can modify our previous code to pass around types. Recall that our typelist is trivial to construct, so we can change our injector code code to return a typelist based on the template type. Since the type is no longer known at function declaration, we need to make the return type <code>auto</code>. On the <code>GetterFunction()</code> side, we can extract the type from the <code>GetType()</code> by calling declspec on it.</p>
 <pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">()</span></span>;
 
@@ -587,7 +632,8 @@ Within a function, any constexpr bools, classes, or lambdas won't be accessible 
     <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;<span class="hljs-keyword">decltype</span>(GetType()), Typelist&lt;<span class="hljs-keyword">float</span>&gt;&gt;::value, <span class="hljs-string">""</span>);
 }
 </div></code></pre>
-<h2 id="tracking-multiple-types">Tracking multiple types</h2>
+<p><a name="2_2"></a></p>
+<h3 id="tracking-multiple-types" tabindex="-1" id="tracking-multiple-types">Tracking multiple types</h3>
 <p>The next challenge we have is storing multiple types. Our solution would not be very extensible if we had to declare a separate <code>GetTypeN()</code> function for each type.</p>
 <pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType0</span><span class="hljs-params">()</span></span>;
 <span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType1</span><span class="hljs-params">()</span></span>;
@@ -661,7 +707,8 @@ TypeSetter&lt;<span class="hljs-number">0</span>, <span class="hljs-keyword">flo
     &gt;::value, <span class="hljs-string">""</span>);
 }
 </div></code></pre>
-<h2 id="polishing-off-the-friend-injection-classes">Polishing off the friend injection classes</h2>
+<p><a name="2_3"></a></p>
+<h3 id="polishing-off-the-friend-injection-classes" tabindex="-1" id="polishing-off-the-friend-injection-classes">Polishing off the friend injection classes</h3>
 <p>We know we're going to need to declare independent typelists for each service, so we can go ahead and prepare for that now. This is one of the easier parts--all we need to do is add a <code>Tag</code> type to the <code>Index</code> and <code>TypeSetter</code> template parameters, so <code>GetType(Index&lt;Tag1, 3&gt;)</code> returns a different typelist than <code>GetType(Index&lt;Tag2, 3&gt;)</code>.</p>
 <pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
 <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Index</span> {</span>
@@ -675,7 +722,8 @@ TypeSetter&lt;<span class="hljs-number">0</span>, <span class="hljs-keyword">flo
 };
 </div></code></pre>
 <p>And with this, <code>Index</code> and <code>TypeSetter</code> are in their final form! From here, we'll now be using these as core building blocks for the rest of our code.</p>
-<h2 id="checking-which-indices-are-set">Checking which indices are set</h2>
+<p><a name="3"></a></p>
+<h2 id="part-2%3A-indexisset" tabindex="-1" id="part-2-indexisset">Part 2: IndexIsSet</h2>
 <p>So far, we can declare a set of typelists in a function, and have them show up in another, which is already exciting. However, we're still missing some functionality to make this easy to use. Using the type indices directly is error-prone. Ideally, on the setting side, we would set our first type to index 0, then our next type to 1, and so on. On the getting side, we would like to automatically generate the full typelist, without having to know how many types have been tracked.</p>
 <pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">BadSetterFunction</span><span class="hljs-params">()</span> </span>{
     <span class="hljs-keyword">auto</span> obj0 = TypeSetter&lt;BadTag, <span class="hljs-number">0</span>, <span class="hljs-keyword">float</span>&gt;{};
@@ -759,7 +807,10 @@ TypeSetter&lt;<span class="hljs-number">0</span>, <span class="hljs-keyword">flo
     <span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>;
 }
 </div></code></pre>
-<h2 id="finding-the-next-available-index">Finding the next available index</h2>
+<p><a name="4"></a></p>
+<h2 id="part-3%3A-getmaxindex" tabindex="-1" id="part-3-getmaxindex">Part 3: GetMaxIndex</h2>
+<p><a name="4_0"></a></p>
+<h3 id="finding-the-next-available-index" tabindex="-1" id="finding-the-next-available-index">Finding the next available index</h3>
 <p>The next goal is easily stated: We want to know the next type index available. This way, we can use that index when adding a new type, or list all the types up to that index.</p>
 <p>This can be done with under 20 lines of code, but the reasoning behind these lines is dense. I personally consider this to be the most complicated part of the implementation.</p>
 <p>Before we work on the solution, let's figure out more specifically what we want. Like with <code>IndexIsSet</code>, we want a constexpr template that returns a value, and updates as indices are changed. Unlike <code>IndexIsSet</code>, we can't just pick between a true or false-returning overload. Instead, we have an infinite number of overloads to choose from. This makes SFINAE much less viable.</p>
@@ -777,7 +828,8 @@ TypeSetter&lt;<span class="hljs-number">0</span>, <span class="hljs-keyword">flo
 </div></code></pre>
 <p>Since we didn't specify the <code>Unique</code> parameter, its default argument will be reevaluated for index1. Since the default will be a new type, the call uses a new instance, which means the template is reevaluated and a new result is returned.</p>
 <p>So, in C++14, how can we have an auto-deduced unique parameter for each index? What if we used recursion? There are 3 obstacles to making this possible.</p>
-<h3 id="obstacle-1-the-recursion-has-to-happen-when-the-template-is-called-not-inside-its-instantiation">Obstacle 1: The recursion has to happen when the template is called, not inside its instantiation</h3>
+<p><a name="4_1"></a></p>
+<h3 id="obstacle-1%3A-the-recursion-must-use-new-instances" tabindex="-1" id="obstacle-1-the-recursion-must-use-new-instances">Obstacle 1: The recursion must use new instances</h3>
 <p>These example wouldn't work, for instance:</p>
 <pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;
     <span class="hljs-keyword">typename</span> Tag,
@@ -820,7 +872,8 @@ struct GoodMaxIndex {
 </div></code></pre>
 <p>This will make <code>GoodMaxIndex&lt;Tag, 0&gt;</code> upgrade past 1 once index 1 is set, since it's actually 2 different types--<code>GoodMaxIndex&lt;Tag, 0, true, GoodMaxIndex&lt;Tag, 1, false, void&gt;&gt;</code> and <code>GoodMaxIndex&lt;Tag, 0, true, GoodChecker&lt;Tag, 1, true, GoodMaxIndex&lt;Tag, 2, false, void&gt;&gt;&gt;</code>.</p>
 <img src="http://www.plantuml.com/plantuml/svg/nPN1JyCW5CRl_1M4izi0TsegsStie37Hc_50spTNxM2XpCmi-z-bbDNM6TjiHc_jz_XUVdmFsbbffR6RLO6iVWQx1BD3I2Sla5gSwWpm3c5CIBpGgX8ARQw8DLALQsb0MI9efvGKCdqbubhhx4Pkvog3RIm8wUd1lklnyBw6Ux0MJ4mlSAviVn_-2ooNFIpi0YyABGVGJ0VHx56JlClQjGpXa_PAWcM9Au5IFn2Curp4YRYJHgx0OPNn917n91U-g29C_KDUEke8BsHHWXV6uvPxhjpmLGeTxviiDb3xzrxuaOUVn6FDfiQvXQrx7GUgmN2reSBhoulzAzyWGZQGa9qvKNQ8R00KFmdgxyRA-K0-VcPet0DLbpJSlj7ZCiyoK4_PI8GJXi91EofnYa8jYdm_VF2m83JbAZ4yCaszDlAlHjunyYCZPwYphF7nZeyT-JX2rTS-YkYdI6dGU8lie4rRPhVD6QZC_KG-0000" alt="uml diagram">
-<h3 id="obstacle-2-the-recursion-has-to-be-accessible">Obstacle 2: The recursion has to be accessible</h3>
+<p><a name="4_2"></a></p>
+<h3 id="obstacle-2%3A-the-recursion-must-be-accessible" tabindex="-1" id="obstacle-2-the-recursion-must-be-accessible">Obstacle 2: The recursion must be accessible</h3>
 <p>The recursion name and the default template arguments have to be declared before we set the default template arguments. This is easier said than done.</p>
 <pre class="hljs"><code><div><span class="hljs-comment">// RecurseInfinitely1 isn't declared yet, so we can't use it as a default.</span>
 <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Next = RecurseInfinitely1&lt;&gt;&gt;
@@ -841,7 +894,8 @@ struct RecurseInfinitely2 {};
     struct RecurseInfinitely{};
 };
 </div></code></pre>
-<h3 id="obstacle-3-the-recursion-must-be-terminatable">Obstacle 3: The recursion must be terminatable</h3>
+<p><a name="4_3"></a></p>
+<h3 id="obstacle-3%3A-the-recursion-must-be-terminatable" tabindex="-1" id="obstacle-3-the-recursion-must-be-terminatable">Obstacle 3: The recursion must be terminatable</h3>
 <p>One last major obstacle to solve! we still somehow need to have a termination condition within the template parameter's default arguments. <code>std::conditional_t</code> might seem like a useful option here, since it selects a type based on a condition, but it isn't enough.</p>
 <pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Outer</span> {</span>
     <span class="hljs-keyword">template</span> &lt;
@@ -896,7 +950,8 @@ struct Outer {
 
 <span class="hljs-keyword">auto</span> obj = Outer&lt;&gt;::RecurseOnce&lt;&gt;{};
 </div></code></pre>
-<h3 id="home-stretch-applying-it-to-maxindex">Home stretch: Applying it to MaxIndex</h3>
+<p><a name="4_4"></a></p>
+<h3 id="home-stretch%3A-applying-it-to-maxindex" tabindex="-1" id="home-stretch-applying-it-to-maxindex">Home stretch: Applying it to MaxIndex</h3>
 <p>With all our major obstacles cleared, we're ready to implement <code>MaxIndex</code>! To start with, let's re-add the tag and base <code>keepRecursing</code> on if that index is set.</p>
 <pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;
     <span class="hljs-keyword">typename</span> Tag,
@@ -967,9 +1022,11 @@ struct MaxIndex {
 };
 </div></code></pre>
 <p>We're finally done! Due to the tricky rules of re-evaluating default parameters, these 19 lines of code have the most involved logic behind them. From here, things will be way easier.</p>
-<h2 id="adding-the-stateful-typelist">Adding the stateful typelist</h2>
+<p><a name="5"></a></p>
+<h2 id="part-4%3A-addtype-%2F-listgetter" tabindex="-1" id="part-4-addtype--listgetter">Part 4: AddType / ListGetter</h2>
+<p><a name="5_0"></a></p>
+<h3 id="appending-to-the-stateful-typelist" tabindex="-1" id="appending-to-the-stateful-typelist">Appending to the stateful typelist</h3>
 <p>With the utility structures done, we're now ready to write the code to append and retrieve the stateful typelist!</p>
-<h3 id="appending-to-the-stateful-typelist">Appending to the stateful typelist</h3>
 <p>We'll start with appending to the typelist, which feels trivial compared to the gauntlet we just ran with <code>MaxIndex</code>.</p>
 <pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;
     <span class="hljs-keyword">typename</span> Tag,
@@ -982,7 +1039,8 @@ struct MaxIndex {
 <p>A few things might stand out here. First, since we know the <code>n</code> will make each parameter unique, why not move <code>TypeSetter</code> into the body of the function? This is because for function templates, the compiler is allowed to implement the body of the function any time, from the point the instance is first used, to the end of the translation unit. This means that the side-effects of instantiating <code>TypeSetter</code> could be delayed until way later, which is not what we want--we need to be able to rely on the side effects being visible right away. By moving <code>TypeSetter</code> from the function body to a default parameter, we ensure it will be instantiated right after <code>AddType</code> is called.</p>
 <p>Second, the <code>decltype</code> around the constructed <code>TypeSetter</code> might seem superfluous, but it's actually necessary. As a template, <code>TypeSetter</code> doesn't get instantiated until there's a context that needs the completely-defined type. Just using <code>typename = TypeSetter&lt;Tag, n, T&gt;</code> wouldn't hit this context, so we need to construct the type to force the context, then <code>decltype</code> the constructed object to bring the expression back to a type.</p>
 <p>Finally, why make <code>AddType</code> a function template instead of a class template? This goes back to the previous explanation. If <code>AddType</code> were a type, we would add more layers of classes that might accidentally not be instantiated, so keeping <code>AddType</code> as a function makes it harder to misuse.</p>
-<h3 id="reading-the-stateful-typelist">Reading the stateful typelist</h3>
+<p><a name="5_1"></a></p>
+<h3 id="reading-the-stateful-typelist" tabindex="-1" id="reading-the-stateful-typelist">Reading the stateful typelist</h3>
 <p>Getting the stateful typelist is not too complicated either.</p>
 <pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
 <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">ListGetter</span> {</span>
@@ -1004,7 +1062,8 @@ struct MaxIndex {
 <p>By taking in <code>n</code> as a template parameter, we don't need to do any of the fancy re-evaluation <code>MaxIndex</code> did. We just always have <code>ListGetter&lt;Tag, 3&gt;</code> append to <code>ListGetter&lt;Tag, 2&gt;</code> and so on. This also makes it easy to terminate the recursion by specializing <code>ListGetter&lt;Tag, 0&gt;</code> to return a blank typelist. Finally we add a convenience alias to get the type, and make sure we default <code>n</code> to <code>MaxIndex&lt;Tag&gt;</code> so all the user has to do is type <code>ListGetter_t&lt;Tag&gt;</code> to get an up-to-date stateful typelist.</p>
 <img src="http://www.plantuml.com/plantuml/svg/lP5D2i8m48NtESNWIj7-fCimXEwauC95Bv2sWrHib2O5fVJk9YqM1OMktCnCU8_v7fFKMDNQhhamTYtEL5fO7MfZzsGjjHZB5IW3xXL3pm2mbbZ8esfLGqut61KIerewIGk8NGl3sPPfjrkNz6QoZni9o5tr49Hi-8hbCvOlmF9bsD4LmjQlzGdMcQxeZhawxI2M_R3v4IQPmoJ_2SDVOVpPXV1-mA0Bndi8uIgRfWybcHIMagxSTpu1" alt="uml diagram">
 <p>With this, we finally have a complete stateful typelist implementation! Next, let's showcase it by using it in the template tracker.</p>
-<h2 id="the-template-tracker">The Template Tracker</h2>
+<p><a name="6"></a></p>
+<h2 id="part-5%3A-templatetracker" tabindex="-1" id="part-5-templatetracker">Part 5: TemplateTracker</h2>
 <p>The end is in sight--we're finally writing the class we used in the example!</p>
 <p>Starting with the easy part, we can have unique types for each system and each operation by making a class template with nested classes to represent the operation types. We don't even need to define the nested classes, since we're just using them as identifiers.</p>
 <pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Identifier&gt;
@@ -1060,7 +1119,10 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 </div></code></pre>
 <p>Unfortunately, GCC does not allow dependent default arguments to access private members, so the main choices we have are to either take in all the private types as default arguments, or make the types public.</p>
 <p>Finally, we're done. Everything is implemented, and we can now track templates!</p>
-<h2 id="using-the-template-tracker">Using the template tracker</h2>
+<p><a name="7"></a></p>
+<h2 id="templatetracker-in-action" tabindex="-1" id="templatetracker-in-action">TemplateTracker in action</h2>
+<p><a name="7_0"></a></p>
+<h3 id="using-templatetracker" tabindex="-1" id="using-templatetracker">Using TemplateTracker</h3>
 <p>So how should we use <code>TemplateTracker</code>? I prefer keeping all the template calls for a particular tracker in one function, as this makes it easy to know when to get the stateful typelist: after the function is declared. If possible, having that function be defined in a .cpp means there's no risk anyone can accidentally define the function twice and duplicate insertions.</p>
 <p>A consequence of this is that the compile-time type list is only available to that .cpp. If other code wants to know what types were being accessed, the tracking .cpp will have to convert the compile-time types to some kind of run-time information, like a type ID.</p>
 <pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.h***</span>
@@ -1131,7 +1193,53 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
     &gt;::value, <span class="hljs-string">""</span>);
 }
 </div></code></pre>
-<h2 id="risks">Risks</h2>
+<p><a name="7_1"></a></p>
+<h3 id="pitfalls" tabindex="-1" id="pitfalls">Pitfalls</h3>
+<p>Just as <code>TemplateTracker</code> is trivial to use, so too is it easy to misuse! The main risk is creating an ambiguous stateful typelist. This can happen in a few ways:</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">BlankOutComponent</span><span class="hljs-params">(<span class="hljs-keyword">size_t</span> id)</span> </span>{
+    TemplateTracker&lt;Tag&gt;::GetComponent&lt;T&gt;(id) = T{};
+}
+
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">ZeroVelocity</span><span class="hljs-params">(<span class="hljs-keyword">size_t</span> id)</span> </span>{
+    BlankOutComponent&lt;Physics, Velocity&gt;(id);
+}
+
+<span class="hljs-comment">// Ambiguous! May or may not have added Velocity to PhysicsInfo,</span>
+<span class="hljs-comment">// since BlankOutComponent&lt;Physics, Velocity&gt; could have a point of instantiation after this line.</span>
+<span class="hljs-keyword">using</span> PhysicsInfo = TemplateTracker&lt;Physics&gt;::Info&lt;&gt;
+</div></code></pre>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***a.h***</span>
+<span class="hljs-function"><span class="hljs-keyword">inline</span> <span class="hljs-title">DampenVelocity</span><span class="hljs-params">(<span class="hljs-keyword">size_t</span> id)</span> </span>{
+    TemplateTracker&lt;Physics&gt;::GetComponent&lt;Velocity&gt;(id) *= <span class="hljs-number">0.995f</span>;
+}
+
+<span class="hljs-comment">// ***b.h***</span>
+<span class="hljs-function"><span class="hljs-keyword">inline</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetPhysicsTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-keyword">return</span> GetTypeIDs(TemplateTracker&lt;Physics&gt;::Info&lt;&gt;::GetComponentTypes{});
+}
+
+<span class="hljs-comment">// ***ab.cpp***</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;a.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;b.h&gt;</span></span>
+<span class="hljs-comment">// Ambiguity #1: GetPhysicsTypeIDs() is a function that returns Typelist&lt;Velocity&gt;.</span>
+<span class="hljs-keyword">auto</span> ids = GetPhysicsTypeIDs();
+
+
+<span class="hljs-comment">// ***b.cpp***</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;b.h&gt;</span></span>
+<span class="hljs-comment">// Ambiguity #2: GetPhysicsTypeIDs() is a function that returns Typelist&lt;&gt;.</span>
+<span class="hljs-keyword">auto</span> ids = GetPhysicsTypeIDs();
+</div></code></pre>
+<p>The safest way I've found to avoid these pitfalls is to:</p>
+<ol>
+<li>Avoid any reading or writing of stateful typelists in header files.</li>
+<li>Localize all uses of a specific typelist tag to a single .cpp file.</li>
+<li>Avoid using stateful typelists in function templates, or class template member functions.</li>
+</ol>
+<p>(3) Can be worked around using a variety of tricks, but given how hacky this can be, I'll save that explanation for another article if people are interested.</p>
+<p><a name="7_2"></a></p>
+<h3 id="risks" tabindex="-1" id="risks">Risks</h3>
 <p>Given that different projects have different risk tolerances, I can't really tell you whether it's safe to use these techniques in your project. I can, however, offer some details that can help you decide whether you want use this code:</p>
 <ul>
 <li>I am not an expert on the standard. It's possible that I missed some detail on this section that makes this code Ill-Formed, No Diagnostics Required (IFNDR). If I have missed some detail in the standard that makes this code ill-formed, <em>please</em> let me know, as I'd love to at least warn people, or at best find a solution that's well-formed.</li>
@@ -1142,9 +1250,10 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 <p>The most specific advice I can give would be:</p>
 <ul>
 <li>Consider if you will need to support newer compiler versions. If you will, consider what your exit plan would be if a compiler regression or standards change causes the template tracker to break. From there, weigh if that's worth the benefit of having a template tracker in the first place.</li>
-<li>Consider how you will prevent people from misusing <code>TemplateTracker</code>. If you don't have a good option, it may be too risky.</li>
+<li>Consider how you will prevent people from misusing <code>TemplateTracker</code>. If you don't have a good solution, it may be too risky.</li>
 </ul>
-<h2 id="references-and-thanks">References and thanks</h2>
+<p><a name="8"></a></p>
+<h2 id="references-and-thanks" tabindex="-1" id="references-and-thanks">References and thanks</h2>
 <ul>
 <li>Thanks to James Beaumont-Field, Spencer Miller, and Ted Rivera for checking this article is technically sound.</li>
 <li>Thanks to Olivia Alegria for editing this article.</li>
@@ -1153,7 +1262,8 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 <li>Thank you so much for reading through this article; I really hope it benefited you. If you looked at the code and had any questions, found any problems, or came up with a better way to do anything, please let me know--I'd love to talk about it or maybe improve this article.</li>
 </ul>
 <p>Thanks again!</p>
-<h2 id="full-implementation">Full Implementation</h2>
+<p><a name="9"></a></p>
+<h2 id="full-implementation" tabindex="-1" id="full-implementation">Full Implementation</h2>
 <p>Here is the full implementation, with a use-case. It should work unedited with any compiler / flags listed in the intro.</p>
 <pre class="hljs"><code><div><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stddef.h&gt; // size_t</span></span>
 
@@ -1316,7 +1426,7 @@ HitPoints&amp; <span class="hljs-keyword">operator</span> -= (HitPoints&amp; lhs
     POSITION,
     MESH,
     DAMAGE,
-    HITPOINTS
+    HIT_POINTS
 };
 
 <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> T&gt;
@@ -1330,7 +1440,7 @@ HitPoints&amp; <span class="hljs-keyword">operator</span> -= (HitPoints&amp; lhs
 <span class="hljs-keyword">template</span> &lt;&gt;
 <span class="hljs-keyword">constexpr</span> ID TypeID&lt;Damage&gt; = ID::DAMAGE;
 <span class="hljs-keyword">template</span> &lt;&gt;
-<span class="hljs-keyword">constexpr</span> ID TypeID&lt;HitPoints&gt; = ID::HITPOINTS;
+<span class="hljs-keyword">constexpr</span> ID TypeID&lt;HitPoints&gt; = ID::HIT_POINTS;
 
 <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span>... Ts&gt;
 <span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetTypeIDs</span><span class="hljs-params">(Typelist&lt;Ts...&gt;)</span> </span>{
@@ -1459,9 +1569,9 @@ HitPoints&amp; <span class="hljs-keyword">operator</span> -= (HitPoints&amp; lhs
     HealthSystem healthSystem;
     
     <span class="hljs-comment">// Runtime checks for TUs that don't observe calls to GetComponent().</span>
-    PrintSystemOverlapState(physicsSystem, graphicsSystem);
-    PrintSystemOverlapState(physicsSystem, healthSystem);
-    PrintSystemOverlapState(healthSystem, graphicsSystem);
+    PrintSystemOverlapState(physicsSystem, graphicsSystem); <span class="hljs-comment">// Cannot overlap.</span>
+    PrintSystemOverlapState(physicsSystem, healthSystem); <span class="hljs-comment">// Can overlap.</span>
+    PrintSystemOverlapState(healthSystem, graphicsSystem); <span class="hljs-comment">// Can overlap.</span>
 }
 
 </div></code></pre>
