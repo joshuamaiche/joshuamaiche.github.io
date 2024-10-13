@@ -1,1043 +1,1575 @@
-# Look Ma: No Codegen! Tracking Templates at Compile-Time Using Pure C++14
-2024.10.24
+<!DOCTYPE html>
+<html>
+<head>
+<title>Look Ma: No Codegen! Tracking Templates at Compile-Time Using Pure C++14</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
 
-## Contents
-- [Intro](#0)
-- [Part 0: Typelist](#1)
-- [Part 1: TypeSetter](#2)
-    - [Adding global names from inside a function](#2_0)
-    - [Tracking global types from inside a function](#2_1)
-    - [Tracking multiple types](#2_2)
-    - [Polishing off the friend injection classes](#2_3)
-- [Part 2: IndexIsSet](#3)
-- [Part 3: GetMaxIndex](#4)
-    - [Finding the next available index](#4_0)
-    - [Obstacle 1: The recursion must use new instances](#4_1)
-    - [Obstacle 2: The recursion must to be accessible](#4_2)
-    - [Obstacle 3: The recursion must be terminatable](#4_3)
-    - [Home stretch: Applying it to MaxIndex](#4_4)
-- [Part 4: AddType / ListGetter](#5)
-    - [Appending to the stateful typelist](#5_0)
-    - [Reading the stateful typelist](#5_1)
-- [Part 5: TemplateTracker](#6)
-- [TemplateTracker in action](#7)
-    - [Using TemplateTracker](#7_0)
-    - [Pitfalls](#7_1)
-    - [Risks](#7_2)
-- [References and thanks](#8)
-- [Full Implementation](#9)
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
 
-<a name="0"></a>
-## Intro
-I was working on my game engine, and I had a number of systems with `Act()` functions that would be called as the game ran.
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
 
-```c++
-struct GameSystem { virtual void Act() const; };
-struct PhysicsSystem : GameSystem { virtual void Act() const; }
-struct GraphicsSystem : GameSystem { virtual void Act() const; }
-struct HealthSystem : GameSystem { virtual void Act() const; }
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
 
-// Register systems
-// ...
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
 
-void RunGame() {
-    for(GameSystem& system : systems) {
-        system->Act();
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="look-ma-no-codegen-tracking-templates-at-compile-time-using-pure-c14">Look Ma: No Codegen! Tracking Templates at Compile-Time Using Pure C++14</h1>
+<p>2024.10.24</p>
+<h2 id="contents">Contents</h2>
+<ul>
+<li><a href="#0">Intro</a></li>
+<li><a href="#1">Part 0: Typelist</a></li>
+<li><a href="#2">Part 1: TypeSetter</a>
+<ul>
+<li><a href="#2_0">Adding global names from inside a function</a></li>
+<li><a href="#2_1">Tracking global types from inside a function</a></li>
+<li><a href="#2_2">Tracking multiple types</a></li>
+<li><a href="#2_3">Polishing off the friend injection classes</a></li>
+</ul>
+</li>
+<li><a href="#3">Part 2: IndexIsSet</a></li>
+<li><a href="#4">Part 3: GetMaxIndex</a>
+<ul>
+<li><a href="#4_0">Finding the next available index</a></li>
+<li><a href="#4_1">Obstacle 1: The recursion must use new instances</a></li>
+<li><a href="#4_2">Obstacle 2: The recursion must to be accessible</a></li>
+<li><a href="#4_3">Obstacle 3: The recursion must be terminatable</a></li>
+<li><a href="#4_4">Home stretch: Applying it to MaxIndex</a></li>
+</ul>
+</li>
+<li><a href="#5">Part 4: AddType / ListGetter</a>
+<ul>
+<li><a href="#5_0">Appending to the stateful typelist</a></li>
+<li><a href="#5_1">Reading the stateful typelist</a></li>
+</ul>
+</li>
+<li><a href="#6">Part 5: TemplateTracker</a></li>
+<li><a href="#7">TemplateTracker in action</a>
+<ul>
+<li><a href="#7_0">Using TemplateTracker</a></li>
+<li><a href="#7_1">Pitfalls</a></li>
+<li><a href="#7_2">Risks</a></li>
+</ul>
+</li>
+<li><a href="#8">References and thanks</a></li>
+<li><a href="#9">Full Implementation</a></li>
+</ul>
+<p><a name="0"></a></p>
+<h2 id="intro">Intro</h2>
+<p>I was working on my game engine, and I had a number of systems with <code>Act()</code> functions that would be called as the game ran.</p>
+<pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GameSystem</span> {</span> <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span></span>; };
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span> GameSystem { <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span></span>; }
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GraphicsSystem</span> :</span> GameSystem { <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span></span>; }
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">HealthSystem</span> :</span> GameSystem { <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span></span>; }
+
+<span class="hljs-comment">// Register systems</span>
+<span class="hljs-comment">// ...</span>
+
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">RunGame</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">for</span>(GameSystem&amp; system : systems) {
+        system-&gt;Act();
     }
 }
 
-```
-
-Act would modify the game's data using functions like this:
-```c++
-void PhysicsSystem::Act() {
-    for(size_t id : GetPhysicsEntities()) {
-        const Velocity& vel = GetComponent<const Velocity>(id);
-        Position& pos = GetComponent<Position>(id);
+</div></code></pre>
+<p>Act would modify the game's data using functions like this:</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">PhysicsSystem::Act</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">for</span>(<span class="hljs-keyword">size_t</span> id : GetPhysicsEntities()) {
+        <span class="hljs-keyword">const</span> Velocity&amp; vel = GetComponent&lt;<span class="hljs-keyword">const</span> Velocity&gt;(id);
+        Position&amp; pos = GetComponent&lt;Position&gt;(id);
         pos = pos + vel;
     }
 }
 
-void GraphicsSystem::Act() const {
-    for (size_t id : GetGraphicsEntities()) {
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GraphicsSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetGraphicsEntities()) {
         Render(
-            GetComponent<const Position>(id),
-            GetComponent<const Mesh>(id)
+            GetComponent&lt;<span class="hljs-keyword">const</span> Position&gt;(id),
+            GetComponent&lt;<span class="hljs-keyword">const</span> Mesh&gt;(id)
         );
     }
 }
 
-void HealthSystem::Act() const {
-    for (size_t id : GetHealthEntities()) {
-        HitPoints& hitPoints = GetComponent<HitPoints>(id);
-        const Damage& damage = GetComponent<const Damage>(id);
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">HealthSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetHealthEntities()) {
+        HitPoints&amp; hitPoints = GetComponent&lt;HitPoints&gt;(id);
+        <span class="hljs-keyword">const</span> Damage&amp; damage = GetComponent&lt;<span class="hljs-keyword">const</span> Damage&gt;(id);
         hitPoints -= damage;
-        RemoveComponent<Damage>(id);
+        RemoveComponent&lt;Damage&gt;(id);
     }
 }
-```
-
-I wanted to be able to run these systems in parallel, without the systems worrying about synchronizing data access. Without any guards in place, data races could easily happen.
-
-:[diagram](service_flow_timing_bad.pu)
-
-I realized I could safely run systems in parallel if I knew all the data each of these systems would touch. The question was, how could I track this? I started with a gatekeeper system, where I could specify the types used ahead of time, and validate at compile time that only the specified types were used:
-```c++
-struct PhysicsSystem : AllowedTypes<const Velocity, Position>;
-```
-
-This approach worked, but I didn't like the disadvantages it brought with it.
-- It was easy to accidentally keep types that weren't used anymore, and over-constrain the system.
-- It wasn't very ergonomic to have to bounce back and forth between the gatekeeper's types and the system code every time I wanted to access a new type.
-- It wasn't adaptable to changes in the information I was tracking. If, for instance, I changed my design and started needing to track the order in which my components were accessed, I would have to update all the gatekeepers.
-
-Because of this, I started looking into automatic ways to track function calls. I considered letting the data access functions track what was used.
-```c++
-template <typename T>
-void GetComponent<T> {
-    MarkAccess<T>();
+</div></code></pre>
+<p>I wanted to be able to run these systems in parallel, without the systems worrying about synchronizing data access. Without any guards in place, data races could easily happen.</p>
+<img src="http://www.plantuml.com/plantuml/svg/ZLF1JiCm3BtxAqmveacqqQff89J397Qi9iGzDD5YqIMeIIKcnB-JqYKBwmuSSl3pyxDVd73dHU-7GmUWIIhqT50ByKaEMcjQSWgB5zqh8R4iK3YSWdAMhR9iDSkoBCjWPzy6vt5Blh5al8l0HXp4NiMeiOuyMHFZLzNPblmHWDz3gaLoE9Z1AGbJUGP4XGoA8Xa4l8IJgn5jzD5HwnAJb_YuU49UutgM-rN9EqKooyX_ffWQLgU6rOXjbUYyld0qyXB2gqbrkOxapEhPUQ9XuW5dfrPi93_tuaDVpbH8uGNsebN5sGURcSQxSxcclUx2ySZGMwpnjY7p_j2HKUkTag5e4pKnD8cgDs6UPMxzApmvgSpt_zO9lCuNbOfd5tnboSbOFHbRXHcJ7U2h_9Qk2ySPb97Xj_m0" alt="uml diagram">
+<p>I realized I could safely run systems in parallel if I knew all the data each of these systems would touch. The question was, how could I track this? I started with a gatekeeper system, where I could specify the types used ahead of time, and validate at compile time that only the specified types were used:</p>
+<pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span> AllowedTypes&lt;<span class="hljs-keyword">const</span> Velocity, Position&gt;;
+</div></code></pre>
+<p>This approach worked, but I didn't like the disadvantages it brought with it.</p>
+<ul>
+<li>It was easy to accidentally keep types that weren't used anymore, and over-constrain the system.</li>
+<li>It wasn't very ergonomic to have to bounce back and forth between the gatekeeper's types and the system code every time I wanted to access a new type.</li>
+<li>It wasn't adaptable to changes in the information I was tracking. If, for instance, I changed my design and started needing to track the order in which my components were accessed, I would have to update all the gatekeepers.</li>
+</ul>
+<p>Because of this, I started looking into automatic ways to track function calls. I considered letting the data access functions track what was used.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-keyword">void</span> GetComponent&lt;T&gt; {
+    MarkAccess&lt;T&gt;();
 }
 
-void GameSystem::TrackDataAccess() {
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GameSystem::TrackDataAccess</span><span class="hljs-params">()</span> </span>{
     Act();
     dataAccessed = GetNewDataAccesses();
 }
-```
-
-However, I worried about how branching code wouldn't get tracked:
-```c++
-void HealthSystem::Act() {
-    // Give everyone a second after game start before taking damage.
-    if(GetFramesSinceSpawn() < 60) {
-        return;
+</div></code></pre>
+<p>However, I worried about how branching code wouldn't get tracked:</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">HealthSystem::Act</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-comment">// Give everyone a second after game start before taking damage.</span>
+    <span class="hljs-keyword">if</span>(GetFramesSinceSpawn() &lt; <span class="hljs-number">60</span>) {
+        <span class="hljs-keyword">return</span>;
     }
     
-    // Won't get tracked at startup.
-    for(size_t id : GetHealthEntities()) {
-        const Damage& damage = GetComponent<const Damage>(id);
-        Health& health = GetComponent<Health>(id);
+    <span class="hljs-comment">// Won't get tracked at startup.</span>
+    <span class="hljs-keyword">for</span>(<span class="hljs-keyword">size_t</span> id : GetHealthEntities()) {
+        <span class="hljs-keyword">const</span> Damage&amp; damage = GetComponent&lt;<span class="hljs-keyword">const</span> Damage&gt;(id);
+        Health&amp; health = GetComponent&lt;Health&gt;(id);
         health.hp -= damage.totalDamage;
     }
 }
-```
-
-This led me to decide I wanted to try getting this information at compile-time.
-
-One possible approach would have been to use a code generator that searched for all instances of `GetComponent()`, and generated a .cpp with the types used.
-```c++
-// ***physics_system.gen.cpp***
-// Auto-generated; do not modify.
-std::vector<TypeId> PhysicsSystem::GetAccessedTypes {
-    return std::vector {
-        GetTypeId<const Velocity>(),
-        GetTypeId<Position>()
+</div></code></pre>
+<p>This led me to decide I wanted to try getting this information at compile-time.</p>
+<p>One possible approach would have been to use a code generator that searched for all instances of <code>GetComponent()</code>, and generated a .cpp with the types used.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.gen.cpp***</span>
+<span class="hljs-comment">// Auto-generated; do not modify.</span>
+<span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;TypeId&gt; PhysicsSystem::GetAccessedTypes {
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span> {
+        GetTypeId&lt;<span class="hljs-keyword">const</span> Velocity&gt;(),
+        GetTypeId&lt;Position&gt;()
     };
 }
-```
-
-While this approach seems ideal for a large project with a more refined build system, I didn't want to complicate the simple build process of my small game. On top of this, I worried about edge cases that might be hard for a codegen parser to catch. This is the option I understand the least though, so if you've had success with it, please let me know!
-
-This left me with the solution I'll be sharing here: A compile-time, pure C++ way to track template instantiations. Adapting a game system to use this is trivial: just inherit from `TemplateTracker`, and add a function that reads the the auto-generated typelist.
-
-```c++
-// ***physics_system.h***
-struct PhysicsSystem :
-    public GameSystem,
-    // Added inheritance to TemplateTracker
-    protected TemplateTracker<PhysicsSystem>
+</div></code></pre>
+<p>While this approach seems ideal for a large project with a more refined build system, I didn't want to complicate the simple build process of my small game. On top of this, I worried about edge cases that might be hard for a codegen parser to catch. This is the option I understand the least though, so if you've had success with it, please let me know!</p>
+<p>This left me with the solution I'll be sharing here: A compile-time, pure C++ way to track template instantiations. Adapting a game system to use this is trivial: just inherit from <code>TemplateTracker</code>, and add a function that reads the the auto-generated typelist.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span>
+    <span class="hljs-keyword">public</span> GameSystem,
+    <span class="hljs-comment">// Added inheritance to TemplateTracker</span>
+    <span class="hljs-keyword">protected</span> TemplateTracker&lt;PhysicsSystem&gt;
 {
-    virtual void Act() const override;
-    // Added function to get accessed types.
-    virtual std::vector<ID> GetAccessedTypeIDs() const override;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+    <span class="hljs-comment">// Added function to get accessed types.</span>
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
 };
-```
-```c++
-// ***physics_system.cpp***
-// PhysicsSystem::Act() stays exactly the same.
+</div></code></pre>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.cpp***</span>
+<span class="hljs-comment">// PhysicsSystem::Act() stays exactly the same.</span>
 
-// New function that accesses auto-generated typelist.
-std::vector<ID> PhysicsSystem::GetAccessedTypeIDs() const {
-    // TUs that call GetComponent() have compile-time info that lists all instances called.
-    static_assert(std::is_same<Info<>::GetComponentTypes, Typelist<const Velocity, Position>>::value, "");
+<span class="hljs-comment">// New function that accesses auto-generated typelist.</span>
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">PhysicsSystem::GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-comment">// TUs that call GetComponent() have compile-time info that lists all instances called.</span>
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;Info&lt;&gt;::GetComponentTypes, Typelist&lt;<span class="hljs-keyword">const</span> Velocity, Position&gt;&gt;::value, <span class="hljs-string">""</span>);
  
-    // Run-time info can be returned for other TUs to use.
-    return GetTypeIDs(Info<>::GetComponentTypes{});
+    <span class="hljs-comment">// Run-time info can be returned for other TUs to use.</span>
+    <span class="hljs-keyword">return</span> GetTypeIDs(Info&lt;&gt;::GetComponentTypes{});
 }
-```
+</div></code></pre>
+<p>I stumbled a lot trying to get this to work, so I'll be building up the solution gradually in hopes that it helps someone else that might be trying to solve the same problems. I'll be focusing on the practical (&quot;This won't compile until...&quot;) over the theoretical (&quot;The standard states that...&quot;) for a few reasons.</p>
+<ul>
+<li>Compilers have unique behaviors, so we can't just rely on the standard. With small tweaks, we can support all major compilers.</li>
+<li>I've tweaked this code to ensure it conforms to my understanding of the standard (especially section <a href="https://timsong-cpp.github.io/cppwp/n4140/temp.point#8">temp.point/8</a>). However, I am not a standards expert, and I want to avoid acting like one. I have not read all parts of the standard, and I could be misunderstanding the parts I've read. Please challenge me if you think you see something in the standard that would make this code ill-formed.</li>
+<li>Personally, I find it easier to work through practical examples.</li>
+</ul>
+<p>This implementation supports C++14 or later. MSVC 16.3+ is supported with <code>/W4 /WX</code> flags. Clang 12+ and GCC 7+ are supported with <code>-Wall -Wextra -pedantic -Werror</code> flags.</p>
+<p><a name="1"></a></p>
+<h2 id="part-0-typelist">Part 0: Typelist</h2>
+<p>Before we can automatically track types, we need a way to represent types. I'll be using a simple typelist implementation. Any implementation will do, as long as it does the following:</p>
+<ul>
+<li>Typelists can be appended. We have to do this since we're building up the typelist with each new tracked template instantiation.</li>
+<li>Typelists have a trivial default constructor. We'll be returning typelists to affect function signatures, so we can't use something like an std::tuple here.</li>
+<li>Typelists can be empty. With 0 instantiations, our typelist will be empty, so we need to be able to represent that.</li>
+</ul>
+<p>Here's the simple typelist implementation we'll be using:</p>
+<pre class="hljs"><code><div><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stddef.h&gt; // size_t</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;type_traits&gt; // std::is_same</span></span>
 
-I stumbled a lot trying to get this to work, so I'll be building up the solution gradually in hopes that it helps someone else that might be trying to solve the same problems. I'll be focusing on the practical ("This won't compile until...") over the theoretical ("The standard states that...") for a few reasons.
-- Compilers have unique behaviors, so we can't just rely on the standard. With small tweaks, we can support all major compilers. 
-- I've tweaked this code to ensure it conforms to my understanding of the standard (especially section [temp.point/8](https://timsong-cpp.github.io/cppwp/n4140/temp.point#8)). However, I am not a standards expert, and I want to avoid acting like one. I have not read all parts of the standard, and I could be misunderstanding the parts I've read. Please challenge me if you think you see something in the standard that would make this code ill-formed.
-- Personally, I find it easier to work through practical examples.
-
-This implementation supports C++14 or later. MSVC 16.3+ is supported with `/W4 /WX` flags. Clang 12+ and GCC 7+ are supported with `-Wall -Wextra -pedantic -Werror` flags.
-
-<a name="1"></a>
-## Part 0: Typelist
-Before we can automatically track types, we need a way to represent types. I'll be using a simple typelist implementation. Any implementation will do, as long as it does the following:
-- Typelists can be appended. We have to do this since we're building up the typelist with each new tracked template instantiation.
-- Typelists have a trivial default constructor. We'll be returning typelists to affect function signatures, so we can't use something like an std::tuple here.
-- Typelists can be empty. With 0 instantiations, our typelist will be empty, so we need to be able to represent that.
-
-Here's the simple typelist implementation we'll be using:
-```c++
-#include <stddef.h> // size_t
-#include <type_traits> // std::is_same
-
-template <typename... Ts>
-struct Typelist {
-    template <typename... Us>
-    auto append(Typelist<Us...>) {
-        return Typelist<Ts..., Us...>{};
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span>... Ts&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Typelist</span> {</span>
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span>... Us&gt;
+    <span class="hljs-function"><span class="hljs-keyword">auto</span> <span class="hljs-title">append</span><span class="hljs-params">(Typelist&lt;Us...&gt;)</span> </span>{
+        <span class="hljs-keyword">return</span> Typelist&lt;Ts..., Us...&gt;{};
     }
 };
 
-static_assert(
-    std::is_same<
-    decltype(Typelist<int, float>{}.append(Typelist<double, void>{})),
-    Typelist<int, float, double, void>
-    > ::value, ""
+<span class="hljs-keyword">static_assert</span>(
+    <span class="hljs-built_in">std</span>::is_same&lt;
+    <span class="hljs-keyword">decltype</span>(Typelist&lt;<span class="hljs-keyword">int</span>, <span class="hljs-keyword">float</span>&gt;{}.append(Typelist&lt;<span class="hljs-keyword">double</span>, <span class="hljs-keyword">void</span>&gt;{})),
+    Typelist&lt;<span class="hljs-keyword">int</span>, <span class="hljs-keyword">float</span>, <span class="hljs-keyword">double</span>, <span class="hljs-keyword">void</span>&gt;
+    &gt; ::value, <span class="hljs-string">""</span>
 );
-```
-
-<a name="2"></a>
-
-## Part 1: TypeSetter
-
-<a name="2_0"></a>
-
-### Adding global names from inside a function
-The first challenge we face is sharing compile-time information between two different functions. Let's start with a simple setup. We have a header file declaring a runtime setter and checker and a source file implementing them. How can we edit the bodies of these functions so `SetterFunction()` can create a compile-time bool and `GetterFunction()` can read it?
-```c++
-void SetterFunction() {
-  // set bool here
+</div></code></pre>
+<p><a name="2"></a></p>
+<h2 id="part-1-typesetter">Part 1: TypeSetter</h2>
+<p><a name="2_0"></a></p>
+<h3 id="adding-global-names-from-inside-a-function">Adding global names from inside a function</h3>
+<p>The first challenge we face is sharing compile-time information between two different functions. Let's start with a simple setup. We have a header file declaring a runtime setter and checker and a source file implementing them. How can we edit the bodies of these functions so <code>SetterFunction()</code> can create a compile-time bool and <code>GetterFunction()</code> can read it?</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">SetterFunction</span><span class="hljs-params">()</span> </span>{
+  <span class="hljs-comment">// set bool here</span>
 }
 
-void GetterFunction() {
-    static_assert(/*get bool here*/ == true, "");
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-comment">/*get bool here*/</span> == <span class="hljs-literal">true</span>, <span class="hljs-string">""</span>);
 }
-```
-
-Our options seem limited. The only way to expose a constexpr bool, class, or lambda created in `SetterFunction()` would be to return it, but we're stuck with a void function. What can we do?
+</div></code></pre>
+<p>Our options seem limited. The only way to expose a constexpr bool, class, or lambda created in <code>SetterFunction()</code> would be to return it, but we're stuck with a void function. What can we do?
 The function signatures are already set for us, so we can't return anything.
-Within a function, any constexpr bools, classes, or lambdas won't be accessible outside the function, unless we return them.
+Within a function, any constexpr bools, classes, or lambdas won't be accessible outside the function, unless we return them.</p>
+<p>The solution surprised me. It's possible to define previously-declared functions in classes, by defining a friend function.</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">bool</span> <span class="hljs-title">GetBool</span><span class="hljs-params">()</span></span>;
 
-The solution surprised me. It's possible to define previously-declared functions in classes, by defining a friend function.
-```c++
-constexpr bool GetBool();
-
-struct BoolSetter {
-    friend constexpr bool GetBool() { return true; }
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">BoolSetter</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">bool</span> <span class="hljs-title">GetBool</span><span class="hljs-params">()</span> </span>{ <span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>; }
 };
 
-static_assert(GetBool() == true, ""); // Passes
-```
+<span class="hljs-keyword">static_assert</span>(GetBool() == <span class="hljs-literal">true</span>, <span class="hljs-string">""</span>); <span class="hljs-comment">// Passes</span>
+</div></code></pre>
+<p>This is called friend injection, and <a href="https://b.atch.se/posts/non-constant-constant-expressions/">this article</a> is a great resource for understanding how the standard permits all of this, if you're interested.</p>
+<p>Things get really interesting when we use template parameters to control what the friend-injected function does.</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">bool</span> <span class="hljs-title">GetBool</span><span class="hljs-params">()</span></span>;
 
-This is called friend injection, and [this article](https://b.atch.se/posts/non-constant-constant-expressions/) is a great resource for understanding how the standard permits all of this, if you're interested.
-
-Things get really interesting when we use template parameters to control what the friend-injected function does.
-```c++
-constexpr bool GetBool();
-
-template <bool value>
-struct BoolSetter {
-    friend constexpr bool GetBool() { return value; }
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">bool</span> value&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">BoolSetter</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">bool</span> <span class="hljs-title">GetBool</span><span class="hljs-params">()</span> </span>{ <span class="hljs-keyword">return</span> value; }
 };
 
-auto obj = BoolSetter<true>{};
+<span class="hljs-keyword">auto</span> obj = BoolSetter&lt;<span class="hljs-literal">true</span>&gt;{};
 
-static_assert(GetBool() == true, ""); // Passes
-```
+<span class="hljs-keyword">static_assert</span>(GetBool() == <span class="hljs-literal">true</span>, <span class="hljs-string">""</span>); <span class="hljs-comment">// Passes</span>
+</div></code></pre>
+<p>With this new tool, it's now possible to complete the challenge!</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">bool</span> <span class="hljs-title">GetBool</span><span class="hljs-params">()</span></span>;
 
-With this new tool, it's now possible to complete the challenge!
-```c++
-constexpr bool GetBool();
-
-template <bool value>
-struct BoolSetter {
-    friend constexpr bool GetBool() { return value; }
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">bool</span> value&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">BoolSetter</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">bool</span> <span class="hljs-title">GetBool</span><span class="hljs-params">()</span> </span>{ <span class="hljs-keyword">return</span> value; }
 };
 
-void SetterFunction() {
-    auto obj = BoolSetter<true>{};
-    (void) obj; // Avoid unused warning.
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">SetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">auto</span> obj = BoolSetter&lt;<span class="hljs-literal">true</span>&gt;{};
+    (<span class="hljs-keyword">void</span>) obj; <span class="hljs-comment">// Avoid unused warning.</span>
 }
 
-void GetterFunction() {
-    static_assert(GetBool() == true, "");
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">static_assert</span>(GetBool() == <span class="hljs-literal">true</span>, <span class="hljs-string">""</span>);
 }
-```
+</div></code></pre>
+<p><a name="2_1"></a></p>
+<h3 id="tracking-global-types-from-inside-a-function">Tracking global types from inside a function</h3>
+<p>Bringing this back to type information, we can modify our previous code to pass around types. Recall that our typelist is trivial to construct, so we can change our injector code code to return a typelist based on the template type. Since the type is no longer known at function declaration, we need to make the return type <code>auto</code>. On the <code>GetterFunction()</code> side, we can extract the type from the <code>GetType()</code> by calling declspec on it.</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">()</span></span>;
 
-<a name="2_1"></a>
-
-### Tracking global types from inside a function
-Bringing this back to type information, we can modify our previous code to pass around types. Recall that our typelist is trivial to construct, so we can change our injector code code to return a typelist based on the template type. Since the type is no longer known at function declaration, we need to make the return type `auto`. On the `GetterFunction()` side, we can extract the type from the `GetType()` by calling declspec on it.
-```c++
-constexpr auto GetType();
-
-template <typename T>
-struct TypeSetter {
-    friend constexpr auto GetType() { return Typelist<T>{}; }
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TypeSetter</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">()</span> </span>{ <span class="hljs-keyword">return</span> Typelist&lt;T&gt;{}; }
 };
 
-void SetterFunction() {
-    auto obj = TypeSetter<float>{};
-    (void) obj; // Avoid unused warning.
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">SetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">auto</span> obj = TypeSetter&lt;<span class="hljs-keyword">float</span>&gt;{};
+    (<span class="hljs-keyword">void</span>) obj; <span class="hljs-comment">// Avoid unused warning.</span>
 }
 
-void GetterFunction() {
-    static_assert(std::is_same<decltype(GetType()), Typelist<float>>::value, "");
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;<span class="hljs-keyword">decltype</span>(GetType()), Typelist&lt;<span class="hljs-keyword">float</span>&gt;&gt;::value, <span class="hljs-string">""</span>);
 }
-```
+</div></code></pre>
+<p><a name="2_2"></a></p>
+<h3 id="tracking-multiple-types">Tracking multiple types</h3>
+<p>The next challenge we have is storing multiple types. Our solution would not be very extensible if we had to declare a separate <code>GetTypeN()</code> function for each type.</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType0</span><span class="hljs-params">()</span></span>;
+<span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType1</span><span class="hljs-params">()</span></span>;
+<span class="hljs-comment">// etc</span>
 
-<a name="2_2"></a>
-
-### Tracking multiple types
-The next challenge we have is storing multiple types. Our solution would not be very extensible if we had to declare a separate `GetTypeN()` function for each type.
-```c++
-constexpr auto GetType0();
-constexpr auto GetType1();
-// etc
-
-template <typename T>
-struct TypeSetter0 {
-    friend constexpr auto GetType0() { return Typelist<T>{}; }
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TypeSetter0</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType0</span><span class="hljs-params">()</span> </span>{ <span class="hljs-keyword">return</span> Typelist&lt;T&gt;{}; }
 };
-template <typename T>
-struct TypeSetter1 {
-    friend constexpr auto GetType1() { return Typelist<T>{}; }
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TypeSetter1</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType1</span><span class="hljs-params">()</span> </span>{ <span class="hljs-keyword">return</span> Typelist&lt;T&gt;{}; }
 };
-//etc
-```
+<span class="hljs-comment">//etc</span>
+</div></code></pre>
+<p>How can we offer N functions without manually declaring them all? There's a second part to the friend injection trick: free functions can also be declared as friends. These functions will live in the space of the class that declares them.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// Explicitly NO GetType() declared before here</span>
 
-How can we offer N functions without manually declaring them all? There's a second part to the friend injection trick: free functions can also be declared as friends. These functions will live in the space of the class that declares them.
-```c++
-// Explicitly NO GetType() declared before here
-
-template <size_t n, typename T>
-struct TypeSetter {
-    friend constexpr auto GetType() { return Typelist<T>{}; }
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">size_t</span> n, <span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TypeSetter</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">()</span> </span>{ <span class="hljs-keyword">return</span> Typelist&lt;T&gt;{}; }
 };
-```
-
-This technique is called a "hidden friend", and it's important to note that `GetType()` is neither in global scope, nor accessible via the use of `TypeSetter<n, T>::`.
-```c++
-// Error: GetType does not exist in this scope.
+</div></code></pre>
+<p>This technique is called a &quot;hidden friend&quot;, and it's important to note that <code>GetType()</code> is neither in global scope, nor accessible via the use of <code>TypeSetter&lt;n, T&gt;::</code>.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// Error: GetType does not exist in this scope.</span>
 GetType();
 
-// Error: GetType is not a member of TypeSetter.
-TypeSetter<0, float>::GetType();
-```
-
-Instead, we can access these functions by adding a parameter that will force the Argument-Dependent Lookup (ADL) to look in the `TypeSetter` space.
-```c++
-template <size_t n, typename T>
-struct TypeSetter {
-    friend constexpr auto GetType(TypeSetter) { return Typelist<T>{}; }
+<span class="hljs-comment">// Error: GetType is not a member of TypeSetter.</span>
+TypeSetter&lt;<span class="hljs-number">0</span>, <span class="hljs-keyword">float</span>&gt;::GetType();
+</div></code></pre>
+<p>Instead, we can access these functions by adding a parameter that will force the Argument-Dependent Lookup (ADL) to look in the <code>TypeSetter</code> space.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">size_t</span> n, <span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TypeSetter</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">(TypeSetter)</span> </span>{ <span class="hljs-keyword">return</span> Typelist&lt;T&gt;{}; }
 };
 
-void GetterFunction() {
-    // This works! 
-    GetType(TypeSetter<0, float>{});
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-comment">// This works! </span>
+    GetType(TypeSetter&lt;<span class="hljs-number">0</span>, <span class="hljs-keyword">float</span>&gt;{});
 }
-```
-
-This introduces a new question though: in `GetterFunction()`, how can we access `GetType()` without specifying `float` like we did in the example above? The answer is by keeping the declaration and definition of the function separate, just like we did before! By adding an `Index` type that just declares `GetType()`, we can access or even friend-inject this function using `Index<n>` as a parameter!
-```c++
-template<size_t n>
-struct Index {
-    friend constexpr auto GetType(Index);
+</div></code></pre>
+<p>This introduces a new question though: in <code>GetterFunction()</code>, how can we access <code>GetType()</code> without specifying <code>float</code> like we did in the example above? The answer is by keeping the declaration and definition of the function separate, just like we did before! By adding an <code>Index</code> type that just declares <code>GetType()</code>, we can access or even friend-inject this function using <code>Index&lt;n&gt;</code> as a parameter!</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">size_t</span> n&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Index</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">(Index)</span></span>;
 };
 
-template <size_t n, typename T>
-struct TypeSetter {
-    friend constexpr auto GetType(Index<n>) { return Typelist<T>{}; }
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">size_t</span> n, <span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TypeSetter</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">(Index&lt;n&gt;)</span> </span>{ <span class="hljs-keyword">return</span> Typelist&lt;T&gt;{}; }
 };
-```
-
-`GetType()` is now declared in the `Index` space. `TypeSetter` is defining `GetType()`, but since it uses `Index` as a parameter, the `Index`-space declaration will happen first, then `TypeSetter` is just defining the pre-declared `GetType()`. Note that each different instance of `Index` is declaring a different `GetType()` function.
-
-With this, we've now cleared our second challenge!
-```c++
-void SetterFunction() {
-    auto obj0 = TypeSetter<0, float>{};
-    auto obj1 = TypeSetter<1, bool>{};
-    (void) obj0;
-    (void) obj1;
+</div></code></pre>
+<p><code>GetType()</code> is now declared in the <code>Index</code> space. <code>TypeSetter</code> is defining <code>GetType()</code>, but since it uses <code>Index</code> as a parameter, the <code>Index</code>-space declaration will happen first, then <code>TypeSetter</code> is just defining the pre-declared <code>GetType()</code>. Note that each different instance of <code>Index</code> is declaring a different <code>GetType()</code> function.</p>
+<p>With this, we've now cleared our second challenge!</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">SetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">auto</span> obj0 = TypeSetter&lt;<span class="hljs-number">0</span>, <span class="hljs-keyword">float</span>&gt;{};
+    <span class="hljs-keyword">auto</span> obj1 = TypeSetter&lt;<span class="hljs-number">1</span>, <span class="hljs-keyword">bool</span>&gt;{};
+    (<span class="hljs-keyword">void</span>) obj0;
+    (<span class="hljs-keyword">void</span>) obj1;
 }
 
-void GetterFunction() {
-    static_assert(std::is_same<
-        decltype(GetType(Index<0>{})),
-        Typelist<float>
-    >::value, "");
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;
+        <span class="hljs-keyword">decltype</span>(GetType(Index&lt;<span class="hljs-number">0</span>&gt;{})),
+        Typelist&lt;<span class="hljs-keyword">float</span>&gt;
+    &gt;::value, <span class="hljs-string">""</span>);
 
-    static_assert(std::is_same<
-        decltype(GetType(Index<1>{})),
-        Typelist<bool>
-    >::value, "");
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;
+        <span class="hljs-keyword">decltype</span>(GetType(Index&lt;<span class="hljs-number">1</span>&gt;{})),
+        Typelist&lt;<span class="hljs-keyword">bool</span>&gt;
+    &gt;::value, <span class="hljs-string">""</span>);
 }
-```
-
-<a name="2_3"></a>
-
-### Polishing off the friend injection classes
-We know we're going to need to declare independent typelists for each service, so we can go ahead and prepare for that now. This is one of the easier parts--all we need to do is add a `Tag` type to the `Index` and `TypeSetter` template parameters, so `GetType(Index<Tag1, 3>)` returns a different typelist than `GetType(Index<Tag2, 3>)`.
-```c++
-template<typename Tag, size_t n>
-struct Index {
-    friend constexpr auto GetType(Index);
+</div></code></pre>
+<p><a name="2_3"></a></p>
+<h3 id="polishing-off-the-friend-injection-classes">Polishing off the friend injection classes</h3>
+<p>We know we're going to need to declare independent typelists for each service, so we can go ahead and prepare for that now. This is one of the easier parts--all we need to do is add a <code>Tag</code> type to the <code>Index</code> and <code>TypeSetter</code> template parameters, so <code>GetType(Index&lt;Tag1, 3&gt;)</code> returns a different typelist than <code>GetType(Index&lt;Tag2, 3&gt;)</code>.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Index</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">(Index)</span></span>;
 };
 
-template <typename Tag, size_t n, typename T>
-struct TypeSetter
-{
-    friend constexpr auto GetType(Index<Tag, n>) { return Typelist<T>{}; }
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n, <span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TypeSetter</span>
+{</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">(Index&lt;Tag, n&gt;)</span> </span>{ <span class="hljs-keyword">return</span> Typelist&lt;T&gt;{}; }
 };
-```
-
-And with this, `Index` and `TypeSetter` are in their final form! From here, we'll now be using these as core building blocks for the rest of our code.
-
-<a name="3"></a>
-
-## Part 2: IndexIsSet
-So far, we can declare a set of typelists in a function, and have them show up in another, which is already exciting. However, we're still missing some functionality to make this easy to use. Using the type indices directly is error-prone. Ideally, on the setting side, we would set our first type to index 0, then our next type to 1, and so on. On the getting side, we would like to automatically generate the full typelist, without having to know how many types have been tracked.
-```c++
-void BadSetterFunction() {
-    auto obj0 = TypeSetter<BadTag, 0, float>{};
-    auto obj1 = TypeSetter<BadTag, 1, bool>{};
-    // Accidentally set index 3! This is error prone.
-    auto obj2 = TypeSetter<BadTag, 3, int>{};
+</div></code></pre>
+<p>And with this, <code>Index</code> and <code>TypeSetter</code> are in their final form! From here, we'll now be using these as core building blocks for the rest of our code.</p>
+<p><a name="3"></a></p>
+<h2 id="part-2-indexisset">Part 2: IndexIsSet</h2>
+<p>So far, we can declare a set of typelists in a function, and have them show up in another, which is already exciting. However, we're still missing some functionality to make this easy to use. Using the type indices directly is error-prone. Ideally, on the setting side, we would set our first type to index 0, then our next type to 1, and so on. On the getting side, we would like to automatically generate the full typelist, without having to know how many types have been tracked.</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">BadSetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">auto</span> obj0 = TypeSetter&lt;BadTag, <span class="hljs-number">0</span>, <span class="hljs-keyword">float</span>&gt;{};
+    <span class="hljs-keyword">auto</span> obj1 = TypeSetter&lt;BadTag, <span class="hljs-number">1</span>, <span class="hljs-keyword">bool</span>&gt;{};
+    <span class="hljs-comment">// Accidentally set index 3! This is error prone.</span>
+    <span class="hljs-keyword">auto</span> obj2 = TypeSetter&lt;BadTag, <span class="hljs-number">3</span>, <span class="hljs-keyword">int</span>&gt;{};
 }
 
-void BadGetterFunction() {
-    using AllTypes = decltype(
-        // We forgot to track all 3 types! This is hard to maintain.
-        GetType(Index<BadTag, 0>{})
-        .append(GetType(Index<BadTag, 1>{}))
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">BadGetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">using</span> AllTypes = <span class="hljs-keyword">decltype</span>(
+        <span class="hljs-comment">// We forgot to track all 3 types! This is hard to maintain.</span>
+        GetType(Index&lt;BadTag, <span class="hljs-number">0</span>&gt;{})
+        .append(GetType(Index&lt;BadTag, <span class="hljs-number">1</span>&gt;{}))
     );
 }
 
-void GoodSetterFunction() {
-    // No indices to get wrong!
-    auto obj0 = AddType<GoodTag, float>{};
-    auto obj1 = AddType<GoodTag, bool>{};
-    auto obj2 = AddType<GoodTag, int>{};
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GoodSetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-comment">// No indices to get wrong!</span>
+    <span class="hljs-keyword">auto</span> obj0 = AddType&lt;GoodTag, <span class="hljs-keyword">float</span>&gt;{};
+    <span class="hljs-keyword">auto</span> obj1 = AddType&lt;GoodTag, <span class="hljs-keyword">bool</span>&gt;{};
+    <span class="hljs-keyword">auto</span> obj2 = AddType&lt;GoodTag, <span class="hljs-keyword">int</span>&gt;{};
 }
 
-void GoodGetterFunction() {
-    // Automatically know all types set!
-    using AllTypes = GetAllTypes<GoodTag>;
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GoodGetterFunction</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-comment">// Automatically know all types set!</span>
+    <span class="hljs-keyword">using</span> AllTypes = GetAllTypes&lt;GoodTag&gt;;
 }
 
-```
-
-This all starts with checking if an index is set yet. Let's simplify the problem. Ignoring C++14 compatibility for a moment, how can we check if a function overload exists? We might consider a simple function template with a requires expression to see if a function exists.
-
-```c++
-template <typename Tag, size_t n>
-constexpr bool IndexIsSet() {
-    return requires {GetType(Index<Tag, n>{});};
+</div></code></pre>
+<p>This all starts with checking if an index is set yet. Let's simplify the problem. Ignoring C++14 compatibility for a moment, how can we check if a function overload exists? We might consider a simple function template with a requires expression to see if a function exists.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
+<span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">bool</span> <span class="hljs-title">IndexIsSet</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-keyword">requires</span> {GetType(Index&lt;Tag, n&gt;{});};
 }
 
-struct TestTag;
-auto obj0 = TypeSetter<TestTag, 0, float>{};
-static_assert(IndexIsSet<TestTag, 0>() == true, "");
-static_assert(IndexIsSet<TestTag, 1>() == false, "");
-```
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TestTag</span>;</span>
+<span class="hljs-keyword">auto</span> obj0 = TypeSetter&lt;TestTag, <span class="hljs-number">0</span>, <span class="hljs-keyword">float</span>&gt;{};
+<span class="hljs-keyword">static_assert</span>(IndexIsSet&lt;TestTag, <span class="hljs-number">0</span>&gt;() == <span class="hljs-literal">true</span>, <span class="hljs-string">""</span>);
+<span class="hljs-keyword">static_assert</span>(IndexIsSet&lt;TestTag, <span class="hljs-number">1</span>&gt;() == <span class="hljs-literal">false</span>, <span class="hljs-string">""</span>);
+</div></code></pre>
+<p>Can you see the major problem with this though? Once a function template is instantiated, that specific function template instance will always return the same result.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">auto</span> obj0 = TypeSetter&lt;TestTag, <span class="hljs-number">0</span>, <span class="hljs-keyword">float</span>&gt;{};
+<span class="hljs-keyword">static_assert</span>(IndexIsSet&lt;TestTag, <span class="hljs-number">0</span>&gt;() == <span class="hljs-literal">true</span>, <span class="hljs-string">""</span>);
+<span class="hljs-keyword">static_assert</span>(IndexIsSet&lt;TestTag, <span class="hljs-number">1</span>&gt;() == <span class="hljs-literal">false</span>, <span class="hljs-string">""</span>);
 
-Can you see the major problem with this though? Once a function template is instantiated, that specific function template instance will always return the same result.
-```c++
-auto obj0 = TypeSetter<TestTag, 0, float>{};
-static_assert(IndexIsSet<TestTag, 0>() == true, "");
-static_assert(IndexIsSet<TestTag, 1>() == false, "");
-
-auto obj1 = TypeSetter<TestTag, 1, int>{};
-// Assert fails; test will always return false!
-static_assert(IndexIsSet<TestTag, 1>() == true, "");
-```
-
-How can we work around this? One approach is to use SFINAE.
-```c++
-constexpr bool IndexIsSet(...) {
-    return false;
+<span class="hljs-keyword">auto</span> obj1 = TypeSetter&lt;TestTag, <span class="hljs-number">1</span>, <span class="hljs-keyword">int</span>&gt;{};
+<span class="hljs-comment">// Assert fails; test will always return false!</span>
+<span class="hljs-keyword">static_assert</span>(IndexIsSet&lt;TestTag, <span class="hljs-number">1</span>&gt;() == <span class="hljs-literal">true</span>, <span class="hljs-string">""</span>);
+</div></code></pre>
+<p>How can we work around this? One approach is to use SFINAE.</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">bool</span> <span class="hljs-title">IndexIsSet</span><span class="hljs-params">(...)</span> </span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-literal">false</span>;
 }
 
-template <typename IndexType>
-constexpr std::enable_if_t<
-    requires {GetType(IndexType{});},
-    bool
-> IndexIsSet(IndexType) {
-    return true;
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> IndexType&gt;
+<span class="hljs-keyword">constexpr</span> <span class="hljs-built_in">std</span>::<span class="hljs-keyword">enable_if_t</span>&lt;
+    <span class="hljs-keyword">requires</span> {GetType(IndexType{});},
+    <span class="hljs-keyword">bool</span>
+&gt; IndexIsSet(IndexType) {
+    <span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>;
 }
 
-struct TestTag;
-auto obj0 = TypeSetter<TestTag, 0, float>{};
-static_assert(IndexIsSet(Index<TestTag, 0>{}) == true, "");
-static_assert(IndexIsSet(Index<TestTag, 1>{}) == false, "");
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TestTag</span>;</span>
+<span class="hljs-keyword">auto</span> obj0 = TypeSetter&lt;TestTag, <span class="hljs-number">0</span>, <span class="hljs-keyword">float</span>&gt;{};
+<span class="hljs-keyword">static_assert</span>(IndexIsSet(Index&lt;TestTag, <span class="hljs-number">0</span>&gt;{}) == <span class="hljs-literal">true</span>, <span class="hljs-string">""</span>);
+<span class="hljs-keyword">static_assert</span>(IndexIsSet(Index&lt;TestTag, <span class="hljs-number">1</span>&gt;{}) == <span class="hljs-literal">false</span>, <span class="hljs-string">""</span>);
 
-auto obj1 = TypeSetter<TestTag, 1, int>{};
-// Test will now update to true.
-static_assert(IndexIsSet(Index<TestTag, 1>{}) == true, "");
-```
-
-This may seem like we're opening ourselves up to the same problem, but we're not. Instead of using a template instance every time, our code now checks overload candidates every time. If the type is not set at that index, the function template candidate would fail to compile, and SFINAE skips that candidate. Importantly, this means the template will not be instantiated. On the other hand, once the type is set, the function template can be compiled, so it's instantiated, and it always returns true from now on.
-
-:[diagram](sfinae_flow.pu)
-
-Finally, we can re-enter the C++14 world by avoiding using `requires` in our SFINAE.
-```c++
-constexpr bool IndexIsSet(...) {
-    return false;
+<span class="hljs-keyword">auto</span> obj1 = TypeSetter&lt;TestTag, <span class="hljs-number">1</span>, <span class="hljs-keyword">int</span>&gt;{};
+<span class="hljs-comment">// Test will now update to true.</span>
+<span class="hljs-keyword">static_assert</span>(IndexIsSet(Index&lt;TestTag, <span class="hljs-number">1</span>&gt;{}) == <span class="hljs-literal">true</span>, <span class="hljs-string">""</span>);
+</div></code></pre>
+<p>This may seem like we're opening ourselves up to the same problem, but we're not. Instead of using a template instance every time, our code now checks overload candidates every time. If the type is not set at that index, the function template candidate would fail to compile, and SFINAE skips that candidate. Importantly, this means the template will not be instantiated. On the other hand, once the type is set, the function template can be compiled, so it's instantiated, and it always returns true from now on.</p>
+<img src="http://www.plantuml.com/plantuml/svg/RP31QiCm38RlVWeT7TXbrsHqXS56OQo7vWMyHcar73jOVqPBsRjFwS9OOJVP-ZxnIsj5A9Y6wDorSlKE0TnFiJsF74MnIHsVDhfZ-7zR3oqhsd2ue_lLvQjgNBtzv19pwAYmvZX1ScgSzFw5yORZBB-Ql7t_u3tyTSRyPoxnoHhwM16EdFoPjPgzPoaAWWnCoYpfG89Rb7xOcYJP5WbYEGayZD6And5K9fzovJXrqXkt3p7-0fINm9RTCcCgYL2c6x5-cWtRUbJHlyB2zy7GPfcloADpQtlOORy1" alt="uml diagram">
+<p>Finally, we can re-enter the C++14 world by avoiding using <code>requires</code> in our SFINAE.</p>
+<pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">bool</span> <span class="hljs-title">IndexIsSet</span><span class="hljs-params">(...)</span> </span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-literal">false</span>;
 }
 
-template <typename IndexType>
-constexpr auto IndexIsSet(IndexType) -> decltype(GetType(IndexType{}), bool{}) {
-    return true;
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> IndexType&gt;
+<span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">IndexIsSet</span><span class="hljs-params">(IndexType)</span> -&gt; <span class="hljs-title">decltype</span><span class="hljs-params">(GetType(IndexType{}), <span class="hljs-keyword">bool</span>{})</span> </span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>;
 }
-```
-
-<a name="4"></a>
-
-## Part 3: GetMaxIndex
-
-<a name="4_0"></a>
-
-### Finding the next available index
-The next goal is easily stated: We want to know the next type index available. This way, we can use that index when adding a new type, or list all the types up to that index.
-
-This can be done with under 20 lines of code, but the reasoning behind these lines is dense. I personally consider this to be the most complicated part of the implementation.
-
-Before we work on the solution, let's figure out more specifically what we want. Like with `IndexIsSet`, we want a constexpr template that returns a value, and updates as indices are changed. Unlike `IndexIsSet`, we can't just pick between a true or false-returning overload. Instead, we have an infinite number of overloads to choose from. This makes SFINAE much less viable.
-
-Not all hope is lost, though. How else can we re-evaluate our state every time our function template is called, instead of once in the body of the function template?
-
-The answer lies in the template parameters. By having a default template parameter, the expression for that template will be evaluated every time. We're still only having one "state" per template instance, we just now have more instances.
-```c++
-template <typename Tag, typename Unique = MagicUniqueTypePerIndexState>
-size_t GetMaxIndex() {
-    // Calculate and return max index
+</div></code></pre>
+<p><a name="4"></a></p>
+<h2 id="part-3-getmaxindex">Part 3: GetMaxIndex</h2>
+<p><a name="4_0"></a></p>
+<h3 id="finding-the-next-available-index">Finding the next available index</h3>
+<p>The next goal is easily stated: We want to know the next type index available. This way, we can use that index when adding a new type, or list all the types up to that index.</p>
+<p>This can be done with under 20 lines of code, but the reasoning behind these lines is dense. I personally consider this to be the most complicated part of the implementation.</p>
+<p>Before we work on the solution, let's figure out more specifically what we want. Like with <code>IndexIsSet</code>, we want a constexpr template that returns a value, and updates as indices are changed. Unlike <code>IndexIsSet</code>, we can't just pick between a true or false-returning overload. Instead, we have an infinite number of overloads to choose from. This makes SFINAE much less viable.</p>
+<p>Not all hope is lost, though. How else can we re-evaluate our state every time our function template is called, instead of once in the body of the function template?</p>
+<p>The answer lies in the template parameters. By having a default template parameter, the expression for that template will be evaluated every time. We're still only having one &quot;state&quot; per template instance, we just now have more instances.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">typename</span> Unique = MagicUniqueTypePerIndexState&gt;
+<span class="hljs-keyword">size_t</span> GetMaxIndex() {
+    <span class="hljs-comment">// Calculate and return max index</span>
 }
 
-size_t index0 = GetMaxIndex<TestTag>();
-auto obj0 = TypeSetter<TestTag, 0, float>{};
-// Will be different from index0.
-size_t index1 = GetMaxIndex<TestTag>();
-```
-Since we didn't specify the `Unique` parameter, its default argument will be reevaluated for index1. Since the default will be a new type, the call uses a new instance, which means the template is reevaluated and a new result is returned.
-
-So, in C++14, how can we have an auto-deduced unique parameter for each index? What if we used recursion? There are 3 obstacles to making this possible.
-
-<a name="4_1"></a>
-
-### Obstacle 1: The recursion must use new instances
-These example wouldn't work, for instance:
-```c++
-template <
-    typename Tag,
-    size_t n = 0,
-    bool isSet = IndexIsSet(Index<Tag, N>{})
->
+<span class="hljs-keyword">size_t</span> index0 = GetMaxIndex&lt;TestTag&gt;();
+<span class="hljs-keyword">auto</span> obj0 = TypeSetter&lt;TestTag, <span class="hljs-number">0</span>, <span class="hljs-keyword">float</span>&gt;{};
+<span class="hljs-comment">// Will be different from index0.</span>
+<span class="hljs-keyword">size_t</span> index1 = GetMaxIndex&lt;TestTag&gt;();
+</div></code></pre>
+<p>Since we didn't specify the <code>Unique</code> parameter, its default argument will be reevaluated for index1. Since the default will be a new type, the call uses a new instance, which means the template is reevaluated and a new result is returned.</p>
+<p>So, in C++14, how can we have an auto-deduced unique parameter for each index? What if we used recursion? There are 3 obstacles to making this possible.</p>
+<p><a name="4_1"></a></p>
+<h3 id="obstacle-1-the-recursion-must-use-new-instances">Obstacle 1: The recursion must use new instances</h3>
+<p>These example wouldn't work, for instance:</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;
+    <span class="hljs-keyword">typename</span> Tag,
+    <span class="hljs-keyword">size_t</span> n = <span class="hljs-number">0</span>,
+    <span class="hljs-keyword">bool</span> isSet = IndexIsSet(Index&lt;Tag, N&gt;{})
+&gt;
 struct BadMaxIndex {
-    static constexpr size_t value = BadMaxIndex<Tag, n + 1>::value;
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">size_t</span> value = BadMaxIndex&lt;Tag, n + <span class="hljs-number">1</span>&gt;::value;
 };
 
-template <typename Tag, size_t n>
-struct BadMaxIndex<Tag, n, false> {
-    static constexpr size_t value = n;
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">BadMaxIndex</span>&lt;Tag, n, false&gt; {</span>
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">size_t</span> value = n;
 };
 
-struct DummyTag;
-static_assert(BadMaxIndex<DummyTag>::value == 0, ""); // Passes: value is 0.
-auto obj0 = TypeSetter<DummyTag, 0, int>{};
-static_assert(BadMaxIndex<DummyTag>::value == 1, ""); // Passes: value is 1.
-auto obj1 = TypeSetter<DummyTag, 0, float>{};
-static_assert(BadMaxIndex<DummyTag>::value == 2, ""); // Fails: value is 1.
-```
-Yes, `BadMaxIndex<DummyTag, 0, false>` will upgrade to `BadMaxIndex<DummyTag, 0, true>` once a type is set at index 0. However, `BadMaxIndex<DummyTag, 0, true>` will now always return 1, since that's encoded into the instance body.
-
-:[diagram](bad_max_index.pu)
-
-This isn't too bad. Ignoring the upcoming obstacles, we can generate the appropriate unique instances by including the next checker as a type in the default argument.
-```c++
-template <
-    typename Tag,
-    size_t n = 0,
-    bool isSet = IndexIsSet(Index<Tag, n>{})
-    typename Next = GoodMaxIndex<Tag, n + 1> 
->
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">DummyTag</span>;</span>
+<span class="hljs-keyword">static_assert</span>(BadMaxIndex&lt;DummyTag&gt;::value == <span class="hljs-number">0</span>, <span class="hljs-string">""</span>); <span class="hljs-comment">// Passes: value is 0.</span>
+<span class="hljs-keyword">auto</span> obj0 = TypeSetter&lt;DummyTag, <span class="hljs-number">0</span>, <span class="hljs-keyword">int</span>&gt;{};
+<span class="hljs-keyword">static_assert</span>(BadMaxIndex&lt;DummyTag&gt;::value == <span class="hljs-number">1</span>, <span class="hljs-string">""</span>); <span class="hljs-comment">// Passes: value is 1.</span>
+<span class="hljs-keyword">auto</span> obj1 = TypeSetter&lt;DummyTag, <span class="hljs-number">0</span>, <span class="hljs-keyword">float</span>&gt;{};
+<span class="hljs-keyword">static_assert</span>(BadMaxIndex&lt;DummyTag&gt;::value == <span class="hljs-number">2</span>, <span class="hljs-string">""</span>); <span class="hljs-comment">// Fails: value is 1.</span>
+</div></code></pre>
+<p>Yes, <code>BadMaxIndex&lt;DummyTag, 0, false&gt;</code> will upgrade to <code>BadMaxIndex&lt;DummyTag, 0, true&gt;</code> once a type is set at index 0. However, <code>BadMaxIndex&lt;DummyTag, 0, true&gt;</code> will now always return 1, since that's encoded into the instance body.</p>
+<img src="http://www.plantuml.com/plantuml/svg/fLCzQyCm4DtrAuJcsB7IJ48LeOCXGw7GRAM3R9qJjueKPBca5F_toewJkb1YXouIz-xZlRlZLfMNpjTxZMps1hd7kLM0ln36XF32cXRGrjqJxwIf3jA1yKGalroPblax4GzIFShZsYWuSa78I0dwLudDvm6UmNjmF9dXqlZnEel_IxaRaK9dkD1MJX2pd2AcGSZRBVWTk33eyzp988nWMU5W9sct2LuAdeadwUGUWfwAppF1vwK8BiDm4hwo2b8PBgIk89XnVCbQcx1WayCWvqFg6jgyvZhvPW8v_I7thfxC7OUew-mqlOtzfjPf86_GQS3HowvK2iohYiIfRTIU06C9ZYBNOscFBGROEMw91r3tCjRnN72QzWX2Ap0g7Dit" alt="uml diagram">
+<p>This isn't too bad. Ignoring the upcoming obstacles, we can generate the appropriate unique instances by including the next checker as a type in the default argument.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;
+    <span class="hljs-keyword">typename</span> Tag,
+    <span class="hljs-keyword">size_t</span> n = <span class="hljs-number">0</span>,
+    <span class="hljs-keyword">bool</span> isSet = IndexIsSet(Index&lt;Tag, n&gt;{})
+    <span class="hljs-keyword">typename</span> Next = GoodMaxIndex&lt;Tag, n + <span class="hljs-number">1</span>&gt; 
+&gt;
 struct GoodMaxIndex {
-    static constexpr size_t value = BadMaxIndex<Tag, n + 1>::value;
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">size_t</span> value = BadMaxIndex&lt;Tag, n + <span class="hljs-number">1</span>&gt;::value;
 };
 
-template <typename Tag, size_t n>
-struct GoodMaxIndex<Tag, n, false> {
-    static constexpr size_t value = n;
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GoodMaxIndex</span>&lt;Tag, n, false&gt; {</span>
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">size_t</span> value = n;
 };
-```
-This will make `GoodMaxIndex<Tag, 0>` upgrade past 1 once index 1 is set, since it's actually 2 different types--`GoodMaxIndex<Tag, 0, true, GoodMaxIndex<Tag, 1, false, void>>` and `GoodMaxIndex<Tag, 0, true, GoodChecker<Tag, 1, true, GoodMaxIndex<Tag, 2, false, void>>>`.
-
-:[diagram](good_max_index.pu)
-
-<a name="4_2"></a>
-
-### Obstacle 2: The recursion must be accessible
-The recursion name and the default template arguments have to be declared before we set the default template arguments. This is easier said than done.
-```c++
-// RecurseInfinitely1 isn't declared yet, so we can't use it as a default.
-template <typename Next = RecurseInfinitely1<>>
+</div></code></pre>
+<p>This will make <code>GoodMaxIndex&lt;Tag, 0&gt;</code> upgrade past 1 once index 1 is set, since it's actually 2 different types--<code>GoodMaxIndex&lt;Tag, 0, true, GoodMaxIndex&lt;Tag, 1, false, void&gt;&gt;</code> and <code>GoodMaxIndex&lt;Tag, 0, true, GoodChecker&lt;Tag, 1, true, GoodMaxIndex&lt;Tag, 2, false, void&gt;&gt;&gt;</code>.</p>
+<img src="http://www.plantuml.com/plantuml/svg/nPN1JyCW5CRl_1M4izi0TsegsStie37Hc_50spTNxM2XpCmi-z-bbDNM6TjiHc_jz_XUVdmFsbbffR6RLO6iVWQx1BD3I2Sla5gSwWpm3c5CIBpGgX8ARQw8DLALQsb0MI9efvGKCdqbubhhx4Pkvog3RIm8wUd1lklnyBw6Ux0MJ4mlSAviVn_-2ooNFIpi0YyABGVGJ0VHx56JlClQjGpXa_PAWcM9Au5IFn2Curp4YRYJHgx0OPNn917n91U-g29C_KDUEke8BsHHWXV6uvPxhjpmLGeTxviiDb3xzrxuaOUVn6FDfiQvXQrx7GUgmN2reSBhoulzAzyWGZQGa9qvKNQ8R00KFmdgxyRA-K0-VcPet0DLbpJSlj7ZCiyoK4_PI8GJXi91EofnYa8jYdm_VF2m83JbAZ4yCaszDlAlHjunyYCZPwYphF7nZeyT-JX2rTS-YkYdI6dGU8lie4rRPhVD6QZC_KG-0000" alt="uml diagram">
+<p><a name="4_2"></a></p>
+<h3 id="obstacle-2-the-recursion-must-be-accessible">Obstacle 2: The recursion must be accessible</h3>
+<p>The recursion name and the default template arguments have to be declared before we set the default template arguments. This is easier said than done.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// RecurseInfinitely1 isn't declared yet, so we can't use it as a default.</span>
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Next = RecurseInfinitely1&lt;&gt;&gt;
 struct RecurseInfinitely1 {};
 
-template <typename Next>
-struct RecurseInfinitely2;
-// RecurseInfinitely2's template is declared without default arguments, so we can't leave the template parameters blank.
-template <typename Next = RecurseInfinitely2<>>
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Next&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">RecurseInfinitely2</span>;</span>
+<span class="hljs-comment">// RecurseInfinitely2's template is declared without default arguments, so we can't leave the template parameters blank.</span>
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Next = RecurseInfinitely2&lt;&gt;&gt;
 struct RecurseInfinitely2 {};
-```
-
-However, by making a default template argument depend on a previous template parameter, we can postpone needing the recursion name until we actually instantiate the template. One of the simplest ways I found to structure this is by wrapping the template in an outer struct, and using that struct as a template parameter.
-```c++
-struct Outer {
-    template <
-        typename OuterType = Outer,
-        typename Next = typename OuterType::template RecurseInfinitely<>
-    >
+</div></code></pre>
+<p>However, by making a default template argument depend on a previous template parameter, we can postpone needing the recursion name until we actually instantiate the template. One of the simplest ways I found to structure this is by wrapping the template in an outer struct, and using that struct as a template parameter.</p>
+<pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Outer</span> {</span>
+    <span class="hljs-keyword">template</span> &lt;
+        <span class="hljs-keyword">typename</span> OuterType = Outer,
+        <span class="hljs-keyword">typename</span> Next = <span class="hljs-keyword">typename</span> OuterType::<span class="hljs-keyword">template</span> RecurseInfinitely&lt;&gt;
+    &gt;
     struct RecurseInfinitely{};
 };
-```
-
-<a name="4_3"></a>
-
-### Obstacle 3: The recursion must be terminatable
-One last major obstacle to solve! we still somehow need to have a termination condition within the template parameter's default arguments. `std::conditional_t` might seem like a useful option here, since it selects a type based on a condition, but it isn't enough.
-```c++
-struct Outer {
-    template <
-        typename OuterType = Outer,
-        bool keepRecursing = true,
-        typename Next = std::conditional_t<
+</div></code></pre>
+<p><a name="4_3"></a></p>
+<h3 id="obstacle-3-the-recursion-must-be-terminatable">Obstacle 3: The recursion must be terminatable</h3>
+<p>One last major obstacle to solve! we still somehow need to have a termination condition within the template parameter's default arguments. <code>std::conditional_t</code> might seem like a useful option here, since it selects a type based on a condition, but it isn't enough.</p>
+<pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Outer</span> {</span>
+    <span class="hljs-keyword">template</span> &lt;
+        <span class="hljs-keyword">typename</span> OuterType = Outer,
+        <span class="hljs-keyword">bool</span> keepRecursing = <span class="hljs-literal">true</span>,
+        <span class="hljs-keyword">typename</span> Next = <span class="hljs-built_in">std</span>::<span class="hljs-keyword">conditional_t</span>&lt;
             keepRecursing,
-            // Forces endless recursion.
-            typename OuterType::template RecurseOnce<OuterType, false>,
-            void
-        >
-    >
+            <span class="hljs-comment">// Forces endless recursion.</span>
+            <span class="hljs-keyword">typename</span> OuterType::<span class="hljs-keyword">template</span> RecurseOnce&lt;OuterType, <span class="hljs-literal">false</span>&gt;,
+            <span class="hljs-keyword">void</span>
+        &gt;
+    &gt;
     struct RecurseOnce {};
 };
 
-auto obj = Outer::RecurseOnce<>{};
-```
-
-Even though the discarded type won't be used, it's still evaluated. This means we infinitely evaluate nested `RecurseOnce` types, which won't compile.
-
-:[diagram](endless_recursion.pu)
-
-
-Ideally, what we'd like to do is use two different sets of template parameters depending on whether we want to recurse or not.
-```c++
-// Pick this set of parameters when keepRecursing is false
-template <
-    typename OuterType = Outer,
-    bool keepRecursing = false,
-    typename Next = void
->
+<span class="hljs-keyword">auto</span> obj = Outer::RecurseOnce&lt;&gt;{};
+</div></code></pre>
+<p>Even though the discarded type won't be used, it's still evaluated. This means we infinitely evaluate nested <code>RecurseOnce</code> types, which won't compile.</p>
+<img src="http://www.plantuml.com/plantuml/svg/hP9DYy8m48Rl-HL3zsnjUmmbUF6wMteL3saokbdxiIGJ4MJ_-oOjg5GH5_QOlCyyymQoSYGj-QvbDEoHFj72cR6X-K95aDIel7NuqIjCG3geiv02b4QKZQYabHqIMbSk6r4kZGZH0V5xcZBzdWDPZ-7s7K_48KrJzlD4dlzHlfEjUzrU_ASz74VhcbJGXk2Q7GUZ6QippkCaB3PlJUjngnSYlf13KXbrG9smEhyY5lL4595O7sNh9OrGSG_5fJCgkwTYZpcMpqhP6-vIQxRHFtQjiDVXs_m2" alt="uml diagram">
+<p>Ideally, what we'd like to do is use two different sets of template parameters depending on whether we want to recurse or not.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// Pick this set of parameters when keepRecursing is false</span>
+<span class="hljs-keyword">template</span> &lt;
+    <span class="hljs-keyword">typename</span> OuterType = Outer,
+    <span class="hljs-keyword">bool</span> keepRecursing = <span class="hljs-literal">false</span>,
+    <span class="hljs-keyword">typename</span> Next = <span class="hljs-keyword">void</span>
+&gt;
 struct RecurseOnce {};
 
-// Pick this set of parameters when keepRecursing is true
-template <
-    typename OuterType = Outer,
-    bool keepRecursing = true,
-    typename Next = typename OuterType::template RecurseOnce<OuterType, false>
->
+<span class="hljs-comment">// Pick this set of parameters when keepRecursing is true</span>
+<span class="hljs-keyword">template</span> &lt;
+    <span class="hljs-keyword">typename</span> OuterType = Outer,
+    <span class="hljs-keyword">bool</span> keepRecursing = <span class="hljs-literal">true</span>,
+    <span class="hljs-keyword">typename</span> Next = <span class="hljs-keyword">typename</span> OuterType::<span class="hljs-keyword">template</span> RecurseOnce&lt;OuterType, <span class="hljs-literal">false</span>&gt;
+&gt;
 struct RecurseOnce {};  
-```
-
-The good news is, we can do this by splitting the template in 2! `Outer` can be templated to now serve the additional purpose of offering different definitions of RecurseOnce, depending on whether the recursion condition is still met or not.
-
-```c++
-template<bool keepRecursing = true>
+</div></code></pre>
+<p>The good news is, we can do this by splitting the template in 2! <code>Outer</code> can be templated to now serve the additional purpose of offering different definitions of RecurseOnce, depending on whether the recursion condition is still met or not.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">bool</span> keepRecursing = <span class="hljs-literal">true</span>&gt;
 struct Outer {
-    template <typename = void> // Still need some template to keep signature consistent.
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> = <span class="hljs-keyword">void</span>&gt; <span class="hljs-comment">// Still need some template to keep signature consistent.</span>
     struct RecurseOnce {};
 };
 
-template<>
-struct Outer<true> {
-    template <
-        typename NextOuterType = Outer<false>,
-        typename Next = typename NextOuterType::template RecurseOnce<>
-    >
+<span class="hljs-keyword">template</span>&lt;&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Outer</span>&lt;true&gt; {</span>
+    <span class="hljs-keyword">template</span> &lt;
+        <span class="hljs-keyword">typename</span> NextOuterType = Outer&lt;<span class="hljs-literal">false</span>&gt;,
+        <span class="hljs-keyword">typename</span> Next = <span class="hljs-keyword">typename</span> NextOuterType::<span class="hljs-keyword">template</span> RecurseOnce&lt;&gt;
+    &gt;
     struct RecurseOnce {};
 };
 
-auto obj = Outer<>::RecurseOnce<>{};
-```
-
-<a name="4_4"></a>
-
-### Home stretch: Applying it to MaxIndex
-With all our major obstacles cleared, we're ready to implement `MaxIndex`! To start with, let's re-add the tag and base `keepRecursing` on if that index is set.
-```c++
-template<
-    typename Tag,
-    size_t n = 0,
-    bool keepRecursing = IndexIsSet(Index<Tag, n>{})
->
+<span class="hljs-keyword">auto</span> obj = Outer&lt;&gt;::RecurseOnce&lt;&gt;{};
+</div></code></pre>
+<p><a name="4_4"></a></p>
+<h3 id="home-stretch-applying-it-to-maxindex">Home stretch: Applying it to MaxIndex</h3>
+<p>With all our major obstacles cleared, we're ready to implement <code>MaxIndex</code>! To start with, let's re-add the tag and base <code>keepRecursing</code> on if that index is set.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;
+    <span class="hljs-keyword">typename</span> Tag,
+    <span class="hljs-keyword">size_t</span> n = <span class="hljs-number">0</span>,
+    <span class="hljs-keyword">bool</span> keepRecursing = IndexIsSet(Index&lt;Tag, n&gt;{})
+&gt;
 struct Outer {
-    template <typename = void>
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> = <span class="hljs-keyword">void</span>&gt;
     struct Recurse {};
 };
 
-template<typename Tag, size_t n>
-struct Outer<Tag, n, true> {
-    template <
-        typename NextOuterType = Outer<Tag, n + 1>,
-        typename Next = typename NextOuterType::template Recurse<>
-    >
+<span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Outer</span>&lt;Tag, n, true&gt; {</span>
+    <span class="hljs-keyword">template</span> &lt;
+        <span class="hljs-keyword">typename</span> NextOuterType = Outer&lt;Tag, n + <span class="hljs-number">1</span>&gt;,
+        <span class="hljs-keyword">typename</span> Next = <span class="hljs-keyword">typename</span> NextOuterType::<span class="hljs-keyword">template</span> Recurse&lt;&gt;
+    &gt;
     struct Recurse{};
 };
-```
-Next, let's actually get information out of the template parameters, by changing our `Recurse` struct to a `value` constexpr that returns `n` if we've hit the max, or recurses upwards if the max has not yet been hit. We'll also rename `Outer` to the more descriptive `MaxIndex`.
-```c++
-template<
-    typename Tag,
-    size_t n = 0,
-    bool keepRecursing = IndexIsSet(Index<Tag, n>{})
->
+</div></code></pre>
+<p>Next, let's actually get information out of the template parameters, by changing our <code>Recurse</code> struct to a <code>value</code> constexpr that returns <code>n</code> if we've hit the max, or recurses upwards if the max has not yet been hit. We'll also rename <code>Outer</code> to the more descriptive <code>MaxIndex</code>.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;
+    <span class="hljs-keyword">typename</span> Tag,
+    <span class="hljs-keyword">size_t</span> n = <span class="hljs-number">0</span>,
+    <span class="hljs-keyword">bool</span> keepRecursing = IndexIsSet(Index&lt;Tag, n&gt;{})
+&gt;
 struct MaxIndex {
-    template <typename = void>
-    static constexpr size_t value = n;
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> = <span class="hljs-keyword">void</span>&gt;
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">size_t</span> value = n;
 };
 
-template<typename Tag, size_t n>
-struct MaxIndex<Tag, n, true> {
-    template <
-        typename NextType = MaxIndex<Tag, n + 1>,
-        size_t maxValue = NextType::template value<>
-    >
-    static constexpr size_t value = maxValue;
+<span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">MaxIndex</span>&lt;Tag, n, true&gt; {</span>
+    <span class="hljs-keyword">template</span> &lt;
+        <span class="hljs-keyword">typename</span> NextType = MaxIndex&lt;Tag, n + <span class="hljs-number">1</span>&gt;,
+        <span class="hljs-keyword">size_t</span> maxValue = NextType::<span class="hljs-keyword">template</span> value&lt;&gt;
+    &gt;
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">size_t</span> value = maxValue;
 };
-```
-Note that `typename Next` has changed to `size_t maxValue`, but that's okay--we're still generating new templates every time the stateful typelist is changed, since maxValue will increment each time.
-
-We can now finally test our struct, and we're in for a surprise: GCC and MSVC work correctly, but Clang fails!
-```c++
-struct DummyTag;
-static_assert(MaxIndex<DummyTag>::value<> == 0, "");
-auto obj0 = TypeSetter<DummyTag, 0, int>{};
-static_assert(MaxIndex<DummyTag>::value<> == 1, "");
-auto obj1 = TypeSetter<DummyTag, 1, int>{};
-static_assert(MaxIndex<DummyTag>::value<> == 2, ""); // Clang returns 1 instead of 2.
-```
-
-This comes down to a difference in the way the compilers evaluate our defaulted `NextType`. GCC and MSVC will re-evaluate `NextType`'s default type every time the template is instantiated. Clang will evaluate the default type for `NextType` the first time the enclosing `MaxIndex` is instantiated, then keep using that type every time `value` is instantiated with default arguments. Fortunately, we can force `NextType` to be evaluated every time by having it depend on an earlier default template argument. Even better, the whole reason we had `NextType` in the first place was to force `maxValue` to be reevaluated every time. By adding a different, safe-for-Clang-to-keep-constant first parameter that `maxValue` will depend on, we can eliminate `NextType` entirely.
-
-```c++
-template<
-    typename Tag,
-    size_t n = 0,
-    bool keepRecursing = IndexIsSet(Index<Tag, N>{})
->
+</div></code></pre>
+<p>Note that <code>typename Next</code> has changed to <code>size_t maxValue</code>, but that's okay--we're still generating new templates every time the stateful typelist is changed, since maxValue will increment each time.</p>
+<p>We can now finally test our struct, and we're in for a surprise: GCC and MSVC work correctly, but Clang fails!</p>
+<pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">DummyTag</span>;</span>
+<span class="hljs-keyword">static_assert</span>(MaxIndex&lt;DummyTag&gt;::value&lt;&gt; == <span class="hljs-number">0</span>, <span class="hljs-string">""</span>);
+<span class="hljs-keyword">auto</span> obj0 = TypeSetter&lt;DummyTag, <span class="hljs-number">0</span>, <span class="hljs-keyword">int</span>&gt;{};
+<span class="hljs-keyword">static_assert</span>(MaxIndex&lt;DummyTag&gt;::value&lt;&gt; == <span class="hljs-number">1</span>, <span class="hljs-string">""</span>);
+<span class="hljs-keyword">auto</span> obj1 = TypeSetter&lt;DummyTag, <span class="hljs-number">1</span>, <span class="hljs-keyword">int</span>&gt;{};
+<span class="hljs-keyword">static_assert</span>(MaxIndex&lt;DummyTag&gt;::value&lt;&gt; == <span class="hljs-number">2</span>, <span class="hljs-string">""</span>); <span class="hljs-comment">// Clang returns 1 instead of 2.</span>
+</div></code></pre>
+<p>This comes down to a difference in the way the compilers evaluate our defaulted <code>NextType</code>. GCC and MSVC will re-evaluate <code>NextType</code>'s default type every time the template is instantiated. Clang will evaluate the default type for <code>NextType</code> the first time the enclosing <code>MaxIndex</code> is instantiated, then keep using that type every time <code>value</code> is instantiated with default arguments. Fortunately, we can force <code>NextType</code> to be evaluated every time by having it depend on an earlier default template argument. Even better, the whole reason we had <code>NextType</code> in the first place was to force <code>maxValue</code> to be reevaluated every time. By adding a different, safe-for-Clang-to-keep-constant first parameter that <code>maxValue</code> will depend on, we can eliminate <code>NextType</code> entirely.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;
+    <span class="hljs-keyword">typename</span> Tag,
+    <span class="hljs-keyword">size_t</span> n = <span class="hljs-number">0</span>,
+    <span class="hljs-keyword">bool</span> keepRecursing = IndexIsSet(Index&lt;Tag, N&gt;{})
+&gt;
 struct MaxIndex {
-    template <typename = void>
-    static constexpr size_t value = n;
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> = <span class="hljs-keyword">void</span>&gt;
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">size_t</span> value = n;
 };
 
-template<typename Tag, size_t n>
-struct MaxIndex<Tag, n, true> {
-    template <
-        size_t m = n + 1,
-        size_t maxValue = MaxIndex<Tag, m>::template value<>
-    >
-    static constexpr size_t value = maxValue;
+<span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">MaxIndex</span>&lt;Tag, n, true&gt; {</span>
+    <span class="hljs-keyword">template</span> &lt;
+        <span class="hljs-keyword">size_t</span> m = n + <span class="hljs-number">1</span>,
+        <span class="hljs-keyword">size_t</span> maxValue = MaxIndex&lt;Tag, m&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;
+    &gt;
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">size_t</span> value = maxValue;
 };
-```
-We're finally done! Due to the tricky rules of re-evaluating default parameters, these 19 lines of code have the most involved logic behind them. From here, things will be way easier.
-
-<a name="5"></a>
-
-## Part 4: AddType / ListGetter
-
-<a name="5_0"></a>
-
-### Appending to the stateful typelist
-With the utility structures done, we're now ready to write the code to append and retrieve the stateful typelist!
-
-We'll start with appending to the typelist, which feels trivial compared to the gauntlet we just ran with `MaxIndex`.
-```c++
-template<
-    typename Tag,
-    typename T,
-    size_t n = MaxIndex<Tag>::template value<>,
-    typename = decltype(TypeSetter<Tag, n, T >{})
->
-void AddType() {}
-```
-A few things might stand out here. First, since we know the `n` will make each parameter unique, why not move `TypeSetter` into the body of the function? This is because for function templates, the compiler is allowed to implement the body of the function any time, from the point the instance is first used, to the end of the translation unit. This means that the side-effects of instantiating `TypeSetter` could be delayed until way later, which is not what we want--we need to be able to rely on the side effects being visible right away. By moving `TypeSetter` from the function body to a default parameter, we ensure it will be instantiated right after `AddType` is called.
-
-Second, the `decltype` around the constructed `TypeSetter` might seem superfluous, but it's actually necessary. As a template, `TypeSetter` doesn't get instantiated until there's a context that needs the completely-defined type. Just using `typename = TypeSetter<Tag, n, T>` wouldn't hit this context, so we need to construct the type to force the context, then `decltype` the constructed object to bring the expression back to a type.
-
-Finally, why make `AddType` a function template instead of a class template? This goes back to the previous explanation. If `AddType` were a type, we would add more layers of classes that might accidentally not be instantiated, so keeping `AddType` as a function makes it harder to misuse.
-
-<a name="5_1"></a>
-
-### Reading the stateful typelist
-Getting the stateful typelist is not too complicated either.
-```c++
-template<typename Tag, size_t n>
-struct ListGetter {
-    using type = decltype(
-        typename ListGetter<Tag, n - 1>::type{}.
-        append(GetType(Index<Tag, n - 1>{}))
+</div></code></pre>
+<p>We're finally done! Due to the tricky rules of re-evaluating default parameters, these 19 lines of code have the most involved logic behind them. From here, things will be way easier.</p>
+<p><a name="5"></a></p>
+<h2 id="part-4-addtype--listgetter">Part 4: AddType / ListGetter</h2>
+<p><a name="5_0"></a></p>
+<h3 id="appending-to-the-stateful-typelist">Appending to the stateful typelist</h3>
+<p>With the utility structures done, we're now ready to write the code to append and retrieve the stateful typelist!</p>
+<p>We'll start with appending to the typelist, which feels trivial compared to the gauntlet we just ran with <code>MaxIndex</code>.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;
+    <span class="hljs-keyword">typename</span> Tag,
+    <span class="hljs-keyword">typename</span> T,
+    <span class="hljs-keyword">size_t</span> n = MaxIndex&lt;Tag&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;,
+    <span class="hljs-keyword">typename</span> = <span class="hljs-keyword">decltype</span>(TypeSetter&lt;Tag, n, T &gt;{})
+&gt;
+<span class="hljs-keyword">void</span> AddType() {}
+</div></code></pre>
+<p>A few things might stand out here. First, since we know the <code>n</code> will make each parameter unique, why not move <code>TypeSetter</code> into the body of the function? This is because for function templates, the compiler is allowed to implement the body of the function any time, from the point the instance is first used, to the end of the translation unit. This means that the side-effects of instantiating <code>TypeSetter</code> could be delayed until way later, which is not what we want--we need to be able to rely on the side effects being visible right away. By moving <code>TypeSetter</code> from the function body to a default parameter, we ensure it will be instantiated right after <code>AddType</code> is called.</p>
+<p>Second, the <code>decltype</code> around the constructed <code>TypeSetter</code> might seem superfluous, but it's actually necessary. As a template, <code>TypeSetter</code> doesn't get instantiated until there's a context that needs the completely-defined type. Just using <code>typename = TypeSetter&lt;Tag, n, T&gt;</code> wouldn't hit this context, so we need to construct the type to force the context, then <code>decltype</code> the constructed object to bring the expression back to a type.</p>
+<p>Finally, why make <code>AddType</code> a function template instead of a class template? This goes back to the previous explanation. If <code>AddType</code> were a type, we would add more layers of classes that might accidentally not be instantiated, so keeping <code>AddType</code> as a function makes it harder to misuse.</p>
+<p><a name="5_1"></a></p>
+<h3 id="reading-the-stateful-typelist">Reading the stateful typelist</h3>
+<p>Getting the stateful typelist is not too complicated either.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">ListGetter</span> {</span>
+    <span class="hljs-keyword">using</span> type = <span class="hljs-keyword">decltype</span>(
+        <span class="hljs-keyword">typename</span> ListGetter&lt;Tag, n - <span class="hljs-number">1</span>&gt;::type{}.
+        append(GetType(Index&lt;Tag, n - <span class="hljs-number">1</span>&gt;{}))
     );
 };
 
-template<typename Tag>
-struct ListGetter<Tag, 0> {
-    using type = Typelist<>;
+<span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">ListGetter</span>&lt;Tag, 0&gt; {</span>
+    <span class="hljs-keyword">using</span> type = Typelist&lt;&gt;;
 };
 
-template <typename Tag, size_t n = MaxIndex<Tag>::template value<>>
-using ListGetter_t = typename ListGetter<Tag, n>::type;
-```
-Note that unlike `AddType`, `ListGetter` is a class template. This is because `ListGetter` doesn't have any side-effects, so we don't need to ensure the type gets instantiated in unevaluated contexts.
-
-By taking in `n` as a template parameter, we don't need to do any of the fancy re-evaluation `MaxIndex` did. We just always have `ListGetter<Tag, 3>` append to `ListGetter<Tag, 2>` and so on. This also makes it easy to terminate the recursion by specializing `ListGetter<Tag, 0>` to return a blank typelist. Finally we add a convenience alias to get the type, and make sure we default `n` to `MaxIndex<Tag>` so all the user has to do is type `ListGetter_t<Tag>` to get an up-to-date stateful typelist.
-
-:[diagram](list_getter.pu)
-
-With this, we finally have a complete stateful typelist implementation! Next, let's showcase it by using it in the template tracker.
-
-<a name="6"></a>
-
-## Part 5: TemplateTracker
-The end is in sight--we're finally writing the class we used in the example!
-
-Starting with the easy part, we can have unique types for each system and each operation by making a class template with nested classes to represent the operation types. We don't even need to define the nested classes, since we're just using them as identifiers.
-```c++
-template <typename Identifier>
-struct TemplateTracker {
-private:
-    struct GetComponentTag;
-    struct RemoveComponentTag;
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n = MaxIndex&lt;Tag&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;&gt;
+<span class="hljs-keyword">using</span> ListGetter_t = <span class="hljs-keyword">typename</span> ListGetter&lt;Tag, n&gt;::type;
+</div></code></pre>
+<p>Note that unlike <code>AddType</code>, <code>ListGetter</code> is a class template. This is because <code>ListGetter</code> doesn't have any side-effects, so we don't need to ensure the type gets instantiated in unevaluated contexts.</p>
+<p>By taking in <code>n</code> as a template parameter, we don't need to do any of the fancy re-evaluation <code>MaxIndex</code> did. We just always have <code>ListGetter&lt;Tag, 3&gt;</code> append to <code>ListGetter&lt;Tag, 2&gt;</code> and so on. This also makes it easy to terminate the recursion by specializing <code>ListGetter&lt;Tag, 0&gt;</code> to return a blank typelist. Finally we add a convenience alias to get the type, and make sure we default <code>n</code> to <code>MaxIndex&lt;Tag&gt;</code> so all the user has to do is type <code>ListGetter_t&lt;Tag&gt;</code> to get an up-to-date stateful typelist.</p>
+<img src="http://www.plantuml.com/plantuml/svg/lP5D2i8m48NtESNWIj7-fCimXEwauC95Bv2sWrHib2O5fVJk9YqM1OMktCnCU8_v7fFKMDNQhhamTYtEL5fO7MfZzsGjjHZB5IW3xXL3pm2mbbZ8esfLGqut61KIerewIGk8NGl3sPPfjrkNz6QoZni9o5tr49Hi-8hbCvOlmF9bsD4LmjQlzGdMcQxeZhawxI2M_R3v4IQPmoJ_2SDVOVpPXV1-mA0Bndi8uIgRfWybcHIMagxSTpu1" alt="uml diagram">
+<p>With this, we finally have a complete stateful typelist implementation! Next, let's showcase it by using it in the template tracker.</p>
+<p><a name="6"></a></p>
+<h2 id="part-5-templatetracker">Part 5: TemplateTracker</h2>
+<p>The end is in sight--we're finally writing the class we used in the example!</p>
+<p>Starting with the easy part, we can have unique types for each system and each operation by making a class template with nested classes to represent the operation types. We don't even need to define the nested classes, since we're just using them as identifiers.</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Identifier&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TemplateTracker</span> {</span>
+<span class="hljs-keyword">private</span>:
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GetComponentTag</span>;</span>
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">RemoveComponentTag</span>;</span>
 };
-```
-
-Now for the actual functions.
-```c++
-struct TemplateTracker {
-    // ...
+</div></code></pre>
+<p>Now for the actual functions.</p>
+<pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TemplateTracker</span> {</span>
+    <span class="hljs-comment">// ...</span>
     
-public:
-    template <typename Component, typename = decltype(AddType<GetComponentTag, Component>())>
-    static Component& GetComponent(size_t /*entityIndex*/) {
-        // Return a dummy component to illustrate example.
-        static Component component;
-        return component;
+<span class="hljs-keyword">public</span>:
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Component, <span class="hljs-keyword">typename</span> = <span class="hljs-keyword">decltype</span>(AddType&lt;GetComponentTag, Component&gt;())&gt;
+    <span class="hljs-keyword">static</span> Component&amp; GetComponent(<span class="hljs-keyword">size_t</span> <span class="hljs-comment">/*entityIndex*/</span>) {
+        <span class="hljs-comment">// Return a dummy component to illustrate example.</span>
+        <span class="hljs-keyword">static</span> Component component;
+        <span class="hljs-keyword">return</span> component;
     }
 
-    template <typename Component, typename = decltype(AddType<RemoveComponentTag, Component>())>
-    static void RemoveComponent(size_t /*entityIndex*/) {}
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Component, <span class="hljs-keyword">typename</span> = <span class="hljs-keyword">decltype</span>(AddType&lt;RemoveComponentTag, Component&gt;())&gt;
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> RemoveComponent(<span class="hljs-keyword">size_t</span> <span class="hljs-comment">/*entityIndex*/</span>) {}
 };
-```
-Just like with `AddType`, we need to make sure our side-effects happen in the default template arguments, otherwise we might not see the changes to our stateful typelist until it's too late!
+</div></code></pre>
+<p>Just like with <code>AddType</code>, we need to make sure our side-effects happen in the default template arguments, otherwise we might not see the changes to our stateful typelist until it's too late!</p>
+<p>Since these are demo functions, they don't do much, but there's no limitations. The parameters, template parameters, and body can be extended however needed.</p>
+<p>And with this, we're 99% of the way there! All that's left now is to add a type alias to get the stateful typelists, and our final piece of the puzzle, the TemplateTracker, is complete.</p>
+<pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TemplateTracker</span> {</span>
+    <span class="hljs-comment">// ...</span>
 
-Since these are demo functions, they don't do much, but there's no limitations. The parameters, template parameters, and body can be extended however needed.
-
-And with this, we're 99% of the way there! All that's left now is to add a type alias to get the stateful typelists, and our final piece of the puzzle, the TemplateTracker, is complete.
-```c++
-struct TemplateTracker {
-    // ...
-
-    template <
-        typename GetComponentTagType = GetComponentTag,
-        typename RemoveComponentTagType = RemoveComponentTag,
-        size_t getComponentTypesN = MaxIndex<GetComponentTagType>::template value<>,
-        size_t removeComponentTypesN = MaxIndex<RemoveComponentTagType>::template value<>
-    >
+    <span class="hljs-keyword">template</span> &lt;
+        <span class="hljs-keyword">typename</span> GetComponentTagType = GetComponentTag,
+        <span class="hljs-keyword">typename</span> RemoveComponentTagType = RemoveComponentTag,
+        <span class="hljs-keyword">size_t</span> getComponentTypesN = MaxIndex&lt;GetComponentTagType&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;,
+        <span class="hljs-keyword">size_t</span> removeComponentTypesN = MaxIndex&lt;RemoveComponentTagType&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;
+    &gt;
     struct Info {
-        using GetComponentTypes = ListGetter_t<GetComponentTag, getComponentTypesN>;
-        using RemoveComponentTypes = ListGetter_t<RemoveComponentTag, removeComponentTypesN>;
+        <span class="hljs-keyword">using</span> GetComponentTypes = ListGetter_t&lt;GetComponentTag, getComponentTypesN&gt;;
+        <span class="hljs-keyword">using</span> RemoveComponentTypes = ListGetter_t&lt;RemoveComponentTag, removeComponentTypesN&gt;;
     };
 };
 
-```
+</div></code></pre>
+<p>Like before, the max indices for stateful typelist must be default template arguments, so the template instances can be different as new types are appended. <code>GetComponentTagType</code> and <code>RemoveComponentTagType</code> are there so that <code>getComponentTypesN</code> and <code>removeComponentTypesN</code> depend on them. Otherwise, like with <code>MaxIndex</code>, Clang will reuse the previous default arguments, making <code>getComponentTypesN</code> and <code>removeComponentTypesN</code> fail to update as the stateful typelists change.</p>
+<p>Having both <code>GetComponentTagType</code> and <code>removeComponentTagType</code> might seem excessive. Maybe we could just have <code>TemplateTrackerType</code>, and do something like this?</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;
+    <span class="hljs-keyword">typename</span> TemplateTrackerType = TemplateTracker,
+    <span class="hljs-keyword">size_t</span> getComponentTypesN = MaxIndex&lt;TemplateTracker::GetComponentTag&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;,
+    <span class="hljs-keyword">size_t</span> removeComponentTypesN = MaxIndex&lt;TemplateTracker::RemoveComponentTag&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;
+&gt;
+struct Info {<span class="hljs-comment">/*...*/</span>};
+</div></code></pre>
+<p>Unfortunately, GCC does not allow dependent default arguments to access private members, so the main choices we have are to either take in all the private types as default arguments, or make the types public.</p>
+<p>Finally, we're done. Everything is implemented, and we can now track templates!</p>
+<p><a name="7"></a></p>
+<h2 id="templatetracker-in-action">TemplateTracker in action</h2>
+<p><a name="7_0"></a></p>
+<h3 id="using-templatetracker">Using TemplateTracker</h3>
+<p>So how should we use <code>TemplateTracker</code>? I prefer keeping all the template calls for a particular tracker in one function, as this makes it easy to know when to get the stateful typelist: after the function is declared. If possible, having that function be defined in a .cpp means there's no risk anyone can accidentally define the function twice and duplicate insertions.</p>
+<p>A consequence of this is that the compile-time type list is only available to that .cpp. If other code wants to know what types were being accessed, the tracking .cpp will have to convert the compile-time types to some kind of run-time information, like a type ID.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span> <span class="hljs-keyword">public</span> GameSystem {
+    <span class="hljs-comment">// Templates will be tracked in the .cpp, but unavailable to anyone including the header.</span>
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
 
-Like before, the max indices for stateful typelist must be default template arguments, so the template instances can be different as new types are appended. `GetComponentTagType` and `RemoveComponentTagType` are there so that `getComponentTypesN` and `removeComponentTypesN` depend on them. Otherwise, like with `MaxIndex`, Clang will reuse the previous default arguments, making `getComponentTypesN` and `removeComponentTypesN` fail to update as the stateful typelists change.
-
-Having both `GetComponentTagType` and `removeComponentTagType` might seem excessive. Maybe we could just have `TemplateTrackerType`, and do something like this?
-```c++
-template <
-    typename TemplateTrackerType = TemplateTracker,
-    size_t getComponentTypesN = MaxIndex<TemplateTracker::GetComponentTag>::template value<>,
-    size_t removeComponentTypesN = MaxIndex<TemplateTracker::RemoveComponentTag>::template value<>
->
-struct Info {/*...*/};
-```
-Unfortunately, GCC does not allow dependent default arguments to access private members, so the main choices we have are to either take in all the private types as default arguments, or make the types public.
-
-Finally, we're done. Everything is implemented, and we can now track templates! 
-
-<a name="7"></a>
-
-## TemplateTracker in action
-
-<a name="7_0"></a>
-
-### Using TemplateTracker
-So how should we use `TemplateTracker`? I prefer keeping all the template calls for a particular tracker in one function, as this makes it easy to know when to get the stateful typelist: after the function is declared. If possible, having that function be defined in a .cpp means there's no risk anyone can accidentally define the function twice and duplicate insertions.
-
-A consequence of this is that the compile-time type list is only available to that .cpp. If other code wants to know what types were being accessed, the tracking .cpp will have to convert the compile-time types to some kind of run-time information, like a type ID.
-```c++
-// ***physics_system.h***
-struct PhysicsSystem : public GameSystem {
-    // Templates will be tracked in the .cpp, but unavailable to anyone including the header.
-    virtual void Act() const override;
-
-    // Use functions to let the .cpp convert compile-time type info to run-time type info.
-    virtual std::vector<ID> GetAccessedTypeIDs() const override;
+    <span class="hljs-comment">// Use functions to let the .cpp convert compile-time type info to run-time type info.</span>
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
 
 };
-```
+</div></code></pre>
+<p>For using the template tracker, we could just declare and use it in the function. This prevents the template tracker from even being exposed in the header.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.cpp***</span>
 
-For using the template tracker, we could just declare and use it in the function. This prevents the template tracker from even being exposed in the header.
-```c++
-// ***physics_system.cpp***
+<span class="hljs-keyword">namespace</span>{ <span class="hljs-keyword">using</span> Tracker = TemplateTracker&lt;PhysicsSystem&gt;; }
 
-namespace{ using Tracker = TemplateTracker<PhysicsSystem>; }
-
-void PhysicsSystem::Act() const {
-    for (size_t id : GetPhysicsEntities()) {
-        const Velocity& velocity = Tracker::GetComponent<const Velocity>(id);
-        Position& position = Tracker::GetComponent<Position>(id);
-        position += velocity;
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">PhysicsSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetPhysicsEntities()) {
+        <span class="hljs-keyword">const</span> Velocity&amp; velocity = Tracker::GetComponent&lt;<span class="hljs-keyword">const</span> Velocity&gt;(id);
+        Position&amp; <span class="hljs-built_in">position</span> = Tracker::GetComponent&lt;Position&gt;(id);
+        <span class="hljs-built_in">position</span> += velocity;
     }
 }
 
-// Compile-time info on which types were used with each function.
-static_assert(std::is_same<
-    Tracker::Info<>::GetComponentTypes,
-    Typelist<const Velocity, Position>
->::value, "");
+<span class="hljs-comment">// Compile-time info on which types were used with each function.</span>
+<span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;
+    Tracker::Info&lt;&gt;::GetComponentTypes,
+    Typelist&lt;<span class="hljs-keyword">const</span> Velocity, Position&gt;
+&gt;::value, <span class="hljs-string">""</span>);
 
-std::vector<ID> PhysicsSystem::GetAccessedTypeIDs() const {
-    // Outputs vector with Velocity and Position type IDs.
-    return GetTypeIDs(Info<>::GetComponentTypes{});
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">PhysicsSystem::GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-comment">// Outputs vector with Velocity and Position type IDs.</span>
+    <span class="hljs-keyword">return</span> GetTypeIDs(Info&lt;&gt;::GetComponentTypes{});
 }
-```
-
-Alternatively, we could inherit `PhysicsSystem` from `TemplateTracker`. This has the advantage of making the class declaration be the only place that considers the template tracker. Everywhere else, the code being used looks like regular function templates and type aliases. Protected inheritance would stop any code outside of `PhysicsSystem` from accessing the stateful typelist.
-```c++
-// ***physics_system.h***
-struct PhysicsSystem :
-    public GameSystem,
-    protected TemplateTracker<PhysicsSystem> // Added inheritance
+</div></code></pre>
+<p>Alternatively, we could inherit <code>PhysicsSystem</code> from <code>TemplateTracker</code>. This has the advantage of making the class declaration be the only place that considers the template tracker. Everywhere else, the code being used looks like regular function templates and type aliases. Protected inheritance would stop any code outside of <code>PhysicsSystem</code> from accessing the stateful typelist.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span>
+    <span class="hljs-keyword">public</span> GameSystem,
+    <span class="hljs-keyword">protected</span> TemplateTracker&lt;PhysicsSystem&gt; <span class="hljs-comment">// Added inheritance</span>
 {
-    // ...
+    <span class="hljs-comment">// ...</span>
 
-    friend void Check();
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Check</span><span class="hljs-params">()</span></span>;
 };
 
-// ***physics_system.cpp***
-void PhysicsSystem::Act() {
-    for (size_t id : GetPhysicsEntities()) {
-        const Velocity& velocity = GetComponent<const Velocity>(id);
-        Position& position = GetComponent<Position>(id);
-        position += velocity;
+<span class="hljs-comment">// ***physics_system.cpp***</span>
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">PhysicsSystem::Act</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetPhysicsEntities()) {
+        <span class="hljs-keyword">const</span> Velocity&amp; velocity = GetComponent&lt;<span class="hljs-keyword">const</span> Velocity&gt;(id);
+        Position&amp; <span class="hljs-built_in">position</span> = GetComponent&lt;Position&gt;(id);
+        <span class="hljs-built_in">position</span> += velocity;
     }
 }
 
-std::vector<const char*> PhysicsSystem::GetAddedComponents() {
-    return GetTypeNames(Info<>::GetComponentTypes{});
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>*&gt; <span class="hljs-title">PhysicsSystem::GetAddedComponents</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">return</span> GetTypeNames(Info&lt;&gt;::GetComponentTypes{});
 }
 
-// ...
+<span class="hljs-comment">// ...</span>
 
-// Can only use PhysicsSystem::Info<> from within PhysicsSystem or friends now.
-void Check() {
-    static_assert(std::is_same<
-        PhysicsSystem::Info<>::GetComponentTypes,
-        Typelist<const Velocity, Position>
-    >::value, "");
+<span class="hljs-comment">// Can only use PhysicsSystem::Info&lt;&gt; from within PhysicsSystem or friends now.</span>
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">Check</span><span class="hljs-params">()</span> </span>{
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;
+        PhysicsSystem::Info&lt;&gt;::GetComponentTypes,
+        Typelist&lt;<span class="hljs-keyword">const</span> Velocity, Position&gt;
+    &gt;::value, <span class="hljs-string">""</span>);
 }
-```
-
-<a name="7_1"></a>
-
-### Pitfalls
-Just as `TemplateTracker` is trivial to use, so too is it easy to misuse! The main risk is creating an ambiguous stateful typelist. This can happen in a few ways:
-
-```c++
-template <typename Tag, typename T>
-void BlankOutComponent(size_t id) {
-    TemplateTracker<Tag>::GetComponent<T>(id) = T{};
+</div></code></pre>
+<p><a name="7_1"></a></p>
+<h3 id="pitfalls">Pitfalls</h3>
+<p>Just as <code>TemplateTracker</code> is trivial to use, so too is it easy to misuse! The main risk is creating an ambiguous stateful typelist. This can happen in a few ways:</p>
+<pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">BlankOutComponent</span><span class="hljs-params">(<span class="hljs-keyword">size_t</span> id)</span> </span>{
+    TemplateTracker&lt;Tag&gt;::GetComponent&lt;T&gt;(id) = T{};
 }
 
-void ZeroVelocity(size_t id) {
-    BlankOutComponent<Physics, Velocity>(id);
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">ZeroVelocity</span><span class="hljs-params">(<span class="hljs-keyword">size_t</span> id)</span> </span>{
+    BlankOutComponent&lt;Physics, Velocity&gt;(id);
 }
 
-// Ambiguous! May or may not have added Velocity to PhysicsInfo,
-// since BlankOutComponent<Physics, Velocity> could have a point of instantiation after this line.
-using PhysicsInfo = TemplateTracker<Physics>::Info<>
-```
-
-```c++
-// ***a.h***
-inline DampenVelocity(size_t id) {
-    TemplateTracker<Physics>::GetComponent<Velocity>(id) *= 0.995f;
+<span class="hljs-comment">// Ambiguous! May or may not have added Velocity to PhysicsInfo,</span>
+<span class="hljs-comment">// since BlankOutComponent&lt;Physics, Velocity&gt; could have a point of instantiation after this line.</span>
+<span class="hljs-keyword">using</span> PhysicsInfo = TemplateTracker&lt;Physics&gt;::Info&lt;&gt;
+</div></code></pre>
+<pre class="hljs"><code><div><span class="hljs-comment">// ***a.h***</span>
+<span class="hljs-function"><span class="hljs-keyword">inline</span> <span class="hljs-title">DampenVelocity</span><span class="hljs-params">(<span class="hljs-keyword">size_t</span> id)</span> </span>{
+    TemplateTracker&lt;Physics&gt;::GetComponent&lt;Velocity&gt;(id) *= <span class="hljs-number">0.995f</span>;
 }
 
-// ***b.h***
-inline std::vector<ID> GetPhysicsTypeIDs() const {
-    return GetTypeIDs(TemplateTracker<Physics>::Info<>::GetComponentTypes{});
+<span class="hljs-comment">// ***b.h***</span>
+<span class="hljs-function"><span class="hljs-keyword">inline</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetPhysicsTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>{
+    <span class="hljs-keyword">return</span> GetTypeIDs(TemplateTracker&lt;Physics&gt;::Info&lt;&gt;::GetComponentTypes{});
 }
 
-// ***ab.cpp***
-#include <a.h>
-#include <b.h>
-// Ambiguity #1: GetPhysicsTypeIDs() is a function that returns Typelist<Velocity>.
-auto ids = GetPhysicsTypeIDs();
+<span class="hljs-comment">// ***ab.cpp***</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;a.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;b.h&gt;</span></span>
+<span class="hljs-comment">// Ambiguity #1: GetPhysicsTypeIDs() is a function that returns Typelist&lt;Velocity&gt;.</span>
+<span class="hljs-keyword">auto</span> ids = GetPhysicsTypeIDs();
 
 
-// ***b.cpp***
-#include <b.h>
-// Ambiguity #2: GetPhysicsTypeIDs() is a function that returns Typelist<>.
-auto ids = GetPhysicsTypeIDs();
-```
+<span class="hljs-comment">// ***b.cpp***</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;b.h&gt;</span></span>
+<span class="hljs-comment">// Ambiguity #2: GetPhysicsTypeIDs() is a function that returns Typelist&lt;&gt;.</span>
+<span class="hljs-keyword">auto</span> ids = GetPhysicsTypeIDs();
+</div></code></pre>
+<p>The safest way I've found to avoid these pitfalls is to:</p>
+<ol>
+<li>Avoid any reading or writing of stateful typelists in header files.</li>
+<li>Localize all uses of a specific typelist tag to a single .cpp file.</li>
+<li>Avoid using stateful typelists in function templates, or class template member functions.</li>
+</ol>
+<p>(3) Can be worked around using a variety of tricks, but given how hacky this can be, I'll save that explanation for another article if people are interested.</p>
+<p><a name="7_2"></a></p>
+<h3 id="risks">Risks</h3>
+<p>Given that different projects have different risk tolerances, I can't really tell you whether it's safe to use these techniques in your project. I can, however, offer some details that can help you decide whether you want use this code:</p>
+<ul>
+<li>I am not an expert on the standard. It's possible that I missed some detail on this section that makes this code Ill-Formed, No Diagnostics Required (IFNDR). If I have missed some detail in the standard that makes this code ill-formed, <em>please</em> let me know, as I'd love to at least warn people, or at best find a solution that's well-formed.</li>
+<li>The C++ Core Working Group proposed finding a way to make friend injection ill-formed in <a href="https://cplusplus.github.io/CWG/issues/2118.html">issue 2118</a>. This issue was raised over 9 years ago in 2015, and as far as I know, nothing new has changed.</li>
+<li>These techniques, even if well-formed, rely on some uncommon styles of metaprogramming. Compilers had bugs as recently as 3 years ago that stopped this code from compiling. Techniques this niche are more likely to break from compilers introducing a regression, and these regressions are less likely to have fixes prioritized since they affect fewer people.</li>
+<li>It's not to hard to avoid calling tracked templates or access <code>TemplateTracker::Info&lt;&gt;</code> in headers. However, if a new engineer isn't aware of these rules, it's easy for them to do so accidentally. Worse, since some misuses of <code>TemplateTracker</code> result in Ill-Formed, No Diagnostics Needed (IFNDR) programs, it's possible for a new dev to sneak in ill-formed code without anyone realizing.</li>
+</ul>
+<p><a name="8"></a></p>
+<h2 id="references-and-thanks">References and thanks</h2>
+<ul>
+<li>Thanks to James Beaumont-Field, Spencer Miller, and Ted Rivera for checking this article is technically sound.</li>
+<li>Thanks to Olivia Alegria for editing this article.</li>
+<li>Thanks to Filip Roséen for his series on &quot;<a href="https://b.atch.se/posts/non-constant-constant-expressions/">Non-constant constant-expressions in C++</a>&quot;, which was my introduction to stateful metaprogramming.</li>
+<li>Thanks to Kris Jusiak for his C++20 <a href="https://news.ycombinator.com/item?id=39166067">compile-time type list</a>. Even though I didn't end up using C++20, I don't think I would have had the courage to try C++14 if I didn't have his working solution to start from.</li>
+<li>Thank you so much for reading through this article; I really hope it benefited you. If you looked at the code and had any questions, found any problems, or came up with a better way to do anything, please let me know--I'd love to talk about it or maybe improve this article.</li>
+</ul>
+<p>Thanks again!</p>
+<p><a name="9"></a></p>
+<h2 id="full-implementation">Full Implementation</h2>
+<p>Here is the full implementation, with a use-case. It should work unedited with any compiler / flags listed in the intro.</p>
+<pre class="hljs"><code><div><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stddef.h&gt; // size_t</span></span>
 
-The safest way I've found to avoid these pitfalls is to:
-1) Avoid any reading or writing of stateful typelists in header files.
-2) Localize all uses of a specific typelist tag to a single .cpp file.
-3) Avoid using stateful typelists in function templates, or class template member functions.
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span>... Ts&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Typelist</span> {</span>
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span>... Us&gt;
+    <span class="hljs-function"><span class="hljs-keyword">auto</span> <span class="hljs-title">Append</span><span class="hljs-params">(Typelist&lt;Us...&gt;)</span> </span>{
+        <span class="hljs-keyword">return</span> Typelist&lt;Ts..., Us...&gt;{};
+    }
+};
 
-(3) Can be worked around using a variety of tricks, but given how hacky this can be, I'll save that explanation for another article if people are interested.
+<span class="hljs-meta">#<span class="hljs-meta-keyword">ifdef</span> _MSC_VER</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( push )</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( disable : 4514 ) <span class="hljs-comment">// Unreferenced inline function</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
 
-<a name="7_2"></a>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">if</span> defined(__GNUC__) &amp;&amp; !defined(__clang__)</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> GCC diagnostic push</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> GCC diagnostic ignored <span class="hljs-meta-string">"-Wnon-template-friend"</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
 
-### Risks
-Given that different projects have different risk tolerances, I can't really tell you whether it's safe to use these techniques in your project. I can, however, offer some details that can help you decide whether you want use this code:
-- I am not an expert on the standard. It's possible that I missed some detail on this section that makes this code Ill-Formed, No Diagnostics Required (IFNDR). If I have missed some detail in the standard that makes this code ill-formed, _please_ let me know, as I'd love to at least warn people, or at best find a solution that's well-formed.
-- The C++ Core Working Group proposed finding a way to make friend injection ill-formed in [issue 2118](https://cplusplus.github.io/CWG/issues/2118.html). This issue was raised over 9 years ago in 2015, and as far as I know, nothing new has changed.
-- These techniques, even if well-formed, rely on some uncommon styles of metaprogramming. Compilers had bugs as recently as 3 years ago that stopped this code from compiling. Techniques this niche are more likely to break from compilers introducing a regression, and these regressions are less likely to have fixes prioritized since they affect fewer people.
-- It's not to hard to avoid calling tracked templates or access `TemplateTracker::Info<>` in headers. However, if a new engineer isn't aware of these rules, it's easy for them to do so accidentally. Worse, since some misuses of `TemplateTracker` result in Ill-Formed, No Diagnostics Needed (IFNDR) programs, it's possible for a new dev to sneak in ill-formed code without anyone realizing.
 
-<a name="8"></a>
+<span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Index</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">(Index)</span></span>;
+};
 
-## References and thanks
-- Thanks to James Beaumont-Field, Spencer Miller, and Ted Rivera for checking this article is technically sound.
-- Thanks to Olivia Alegria for editing this article.
-- Thanks to Filip Roséen for his series on "[Non-constant constant-expressions in C++](https://b.atch.se/posts/non-constant-constant-expressions/)", which was my introduction to stateful metaprogramming.
-- Thanks to Kris Jusiak for his C++20 [compile-time type list](https://news.ycombinator.com/item?id=39166067). Even though I didn't end up using C++20, I don't think I would have had the courage to try C++14 if I didn't have his working solution to start from.
-- Thank you so much for reading through this article; I really hope it benefited you. If you looked at the code and had any questions, found any problems, or came up with a better way to do anything, please let me know--I'd love to talk about it or maybe improve this article.
+<span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n, <span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TypeSetter</span> {</span>
+    <span class="hljs-function"><span class="hljs-keyword">friend</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">(Index&lt;Tag, n&gt;)</span> </span>{
+        <span class="hljs-keyword">return</span> Typelist&lt;T&gt;{};
+    }
+};
 
-Thanks again!
 
-<a name="9"></a>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">if</span> defined(__GNUC__) &amp;&amp; !defined(__clang__)</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> GCC diagnostic pop</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
 
-## Full Implementation
-Here is the full implementation, with a use-case. It should work unedited with any compiler / flags listed in the intro.
 
-```c++
-:[code](full_demo.main.cpp)
-```
+<span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">bool</span> <span class="hljs-title">IndexIsSet</span><span class="hljs-params">(...)</span> </span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-literal">false</span>;
+}
+
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> IndexType&gt;
+<span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">IndexIsSet</span><span class="hljs-params">(IndexType)</span> -&gt; <span class="hljs-title">decltype</span><span class="hljs-params">(GetType(IndexType{}), <span class="hljs-keyword">bool</span>{})</span> </span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>;
+}
+
+<span class="hljs-meta">#<span class="hljs-meta-keyword">ifdef</span> _MSC_VER</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">pragma</span> <span class="hljs-meta-keyword">warning</span>( pop )</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">endif</span></span>
+
+<span class="hljs-keyword">template</span>&lt;
+    <span class="hljs-keyword">typename</span> Tag,
+    <span class="hljs-keyword">size_t</span> n = <span class="hljs-number">0</span>,
+    <span class="hljs-keyword">bool</span> keepRecursing = IndexIsSet(Index&lt;Tag, n&gt;{})
+&gt;
+struct MaxIndex {
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> = <span class="hljs-keyword">void</span>&gt;
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">size_t</span> value = n;
+};
+
+<span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">MaxIndex</span>&lt;Tag, n, true&gt; {</span>
+    <span class="hljs-keyword">template</span> &lt;
+        <span class="hljs-keyword">size_t</span> m = n + <span class="hljs-number">1</span>,
+        <span class="hljs-keyword">size_t</span> maxValue = MaxIndex&lt;Tag, m&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;
+    &gt;
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">size_t</span> value = maxValue;
+};
+
+<span class="hljs-keyword">template</span>&lt;
+    <span class="hljs-keyword">typename</span> Tag,
+    <span class="hljs-keyword">typename</span> T,
+    <span class="hljs-keyword">size_t</span> n = MaxIndex&lt;Tag&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;,
+    <span class="hljs-keyword">typename</span> = <span class="hljs-keyword">decltype</span>(TypeSetter&lt;Tag, n, T &gt;{})
+&gt;
+<span class="hljs-keyword">void</span> AddType() {}
+
+<span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
+struct ListGetter {
+    <span class="hljs-keyword">using</span> type = <span class="hljs-keyword">decltype</span>(
+        <span class="hljs-keyword">typename</span> ListGetter&lt;Tag, n - <span class="hljs-number">1</span>&gt;::type{}.
+        Append(GetType(Index&lt;Tag, n - <span class="hljs-number">1</span>&gt;{}))
+        );
+};
+
+<span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">typename</span> Tag&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">ListGetter</span>&lt;Tag, 0&gt; {</span>
+    <span class="hljs-keyword">using</span> type = Typelist&lt;&gt;;
+};
+
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n = MaxIndex&lt;Tag&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;&gt;
+<span class="hljs-keyword">using</span> ListGetter_t = <span class="hljs-keyword">typename</span> ListGetter&lt;Tag, n&gt;::type;
+
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Identifier&gt;
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TemplateTracker</span> {</span>
+<span class="hljs-keyword">private</span>:
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GetComponentTag</span>;</span>
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">RemoveComponentTag</span>;</span>
+
+<span class="hljs-keyword">public</span>:
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Component, <span class="hljs-keyword">typename</span> = <span class="hljs-keyword">decltype</span>(AddType&lt;GetComponentTag, Component&gt;())&gt;
+    <span class="hljs-keyword">static</span> Component&amp; GetComponent(<span class="hljs-keyword">size_t</span> <span class="hljs-comment">/*entityIndex*/</span>)
+    {
+        <span class="hljs-comment">// Return a dummy component to illustrate example.</span>
+        <span class="hljs-keyword">static</span> Component component;
+        <span class="hljs-keyword">return</span> component;
+    }
+
+    <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Component, <span class="hljs-keyword">typename</span> = <span class="hljs-keyword">decltype</span>(AddType&lt;RemoveComponentTag, Component&gt;())&gt;
+    <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> RemoveComponent(<span class="hljs-keyword">size_t</span> <span class="hljs-comment">/*entityIndex*/</span>) {}
+
+    <span class="hljs-keyword">template</span> &lt;
+        <span class="hljs-keyword">typename</span> GetComponentTagType = GetComponentTag,
+        <span class="hljs-keyword">typename</span> RemoveComponentTagType = RemoveComponentTag,
+        <span class="hljs-keyword">size_t</span> getComponentTypesN = MaxIndex&lt;GetComponentTagType&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;,
+        <span class="hljs-keyword">size_t</span> removeComponentTypesN = MaxIndex&lt;RemoveComponentTagType&gt;::<span class="hljs-keyword">template</span> value&lt;&gt;
+    &gt;
+    struct Info {
+        <span class="hljs-keyword">using</span> GetComponentTypes = ListGetter_t&lt;GetComponentTag, getComponentTypesN&gt;;
+        <span class="hljs-keyword">using</span> RemoveComponentTypes = ListGetter_t&lt;RemoveComponentTag, removeComponentTypesN&gt;;
+    };
+};
+
+<span class="hljs-comment">// ***misc.h***</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;vector&gt;</span></span>
+
+<span class="hljs-comment">// Dummy structs and operators.</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Velocity</span> {</span>};
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Position</span> {</span>};
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Mesh</span> {</span>};
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Damage</span> {</span>};
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">HitPoints</span> {</span>};
+Position&amp; <span class="hljs-keyword">operator</span> += (Position&amp; lhs, <span class="hljs-keyword">const</span> Velocity&amp;) { <span class="hljs-keyword">return</span> lhs; }
+HitPoints&amp; <span class="hljs-keyword">operator</span> -= (HitPoints&amp; lhs, <span class="hljs-keyword">const</span> Damage&amp;) { <span class="hljs-keyword">return</span> lhs; }
+
+<span class="hljs-comment">// Dummy functions for getting entity IDs.</span>
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt; <span class="hljs-title">GetPhysicsEntities</span><span class="hljs-params">()</span>
+</span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt;{<span class="hljs-number">0</span>, <span class="hljs-number">1</span>, <span class="hljs-number">2</span>};
+}
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt; <span class="hljs-title">GetGraphicsEntities</span><span class="hljs-params">()</span>
+</span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt;{<span class="hljs-number">0</span>, <span class="hljs-number">1</span>, <span class="hljs-number">2</span>};
+}
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt; <span class="hljs-title">GetHealthEntities</span><span class="hljs-params">()</span>
+</span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;<span class="hljs-keyword">size_t</span>&gt;{<span class="hljs-number">0</span>, <span class="hljs-number">1</span>, <span class="hljs-number">2</span>};
+}
+
+<span class="hljs-comment">// Dummy global functions.</span>
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">Render</span><span class="hljs-params">(<span class="hljs-keyword">const</span> Position&amp;, <span class="hljs-keyword">const</span> Mesh&amp;)</span> </span>{}
+
+<span class="hljs-keyword">enum</span> <span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">ID</span> :</span> <span class="hljs-keyword">size_t</span>
+{
+    UNKNOWN = <span class="hljs-number">0</span>,
+    VELOCITY,
+    POSITION,
+    MESH,
+    DAMAGE,
+    HIT_POINTS
+};
+
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID = ID::UNKNOWN;
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> T&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID&lt;<span class="hljs-keyword">const</span> T&gt; = TypeID&lt;T&gt;;
+<span class="hljs-keyword">template</span> &lt;&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID&lt;Velocity&gt; = ID::VELOCITY;
+<span class="hljs-keyword">template</span> &lt;&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID&lt;Position&gt; = ID::POSITION;
+<span class="hljs-keyword">template</span> &lt;&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID&lt;Damage&gt; = ID::DAMAGE;
+<span class="hljs-keyword">template</span> &lt;&gt;
+<span class="hljs-keyword">constexpr</span> ID TypeID&lt;HitPoints&gt; = ID::HIT_POINTS;
+
+<span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span>... Ts&gt;
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetTypeIDs</span><span class="hljs-params">(Typelist&lt;Ts...&gt;)</span> </span>{
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt;{ TypeID&lt;Ts&gt;... };
+}
+
+<span class="hljs-comment">// ***game_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GameSystem</span>
+{</span>
+    <span class="hljs-keyword">virtual</span> ~GameSystem() = <span class="hljs-keyword">default</span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* <span class="hljs-title">GetName</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>= <span class="hljs-number">0</span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>= <span class="hljs-number">0</span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> </span>= <span class="hljs-number">0</span>;
+};
+
+<span class="hljs-comment">// ***physics_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span> <span class="hljs-keyword">public</span> GameSystem, <span class="hljs-keyword">protected</span> TemplateTracker&lt;PhysicsSystem&gt;
+{
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* <span class="hljs-title">GetName</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span> </span>{ <span class="hljs-keyword">return</span> <span class="hljs-string">"physics"</span>; }
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+};
+
+<span class="hljs-comment">// ***physics_system.cpp***</span>
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">PhysicsSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
+</span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetPhysicsEntities())
+    {
+        <span class="hljs-keyword">const</span> Velocity&amp; velocity = GetComponent&lt;<span class="hljs-keyword">const</span> Velocity&gt;(id);
+        Position&amp; <span class="hljs-built_in">position</span> = GetComponent&lt;Position&gt;(id);
+        <span class="hljs-built_in">position</span> += velocity;
+    }
+}
+
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">PhysicsSystem::GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
+</span>{
+    <span class="hljs-comment">// TUs that call GetComponent() have compile-time info that lists all instances called.</span>
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;Info&lt;&gt;::GetComponentTypes, Typelist&lt;<span class="hljs-keyword">const</span> Velocity, Position&gt;&gt;::value, <span class="hljs-string">""</span>);
+ 
+    <span class="hljs-comment">// Run-time info can be returned for other TUs to use.</span>
+    <span class="hljs-keyword">return</span> GetTypeIDs(Info&lt;&gt;::GetComponentTypes{});
+}
+
+<span class="hljs-comment">// ***graphics_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">GraphicsSystem</span> :</span> <span class="hljs-keyword">public</span> GameSystem, <span class="hljs-keyword">protected</span> TemplateTracker&lt;GraphicsSystem&gt;
+{
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* <span class="hljs-title">GetName</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span> </span>{ <span class="hljs-keyword">return</span> <span class="hljs-string">"graphics"</span>; }
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+};
+
+<span class="hljs-comment">// ***graphics_system.cpp***</span>
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">GraphicsSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
+</span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetGraphicsEntities())
+    {
+        Render(
+            GetComponent&lt;<span class="hljs-keyword">const</span> Position&gt;(id),
+            GetComponent&lt;<span class="hljs-keyword">const</span> Mesh&gt;(id)
+        );
+    }
+}
+
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GraphicsSystem::GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
+</span>{
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;Info&lt;&gt;::GetComponentTypes, Typelist&lt;<span class="hljs-keyword">const</span> Position, <span class="hljs-keyword">const</span> Mesh&gt;&gt;::value, <span class="hljs-string">""</span>);
+    <span class="hljs-keyword">return</span> GetTypeIDs(Info&lt;&gt;::GetComponentTypes{});
+}
+
+<span class="hljs-comment">// ***health_system.h***</span>
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">HealthSystem</span> :</span> <span class="hljs-keyword">public</span> GameSystem, <span class="hljs-keyword">protected</span> TemplateTracker&lt;HealthSystem&gt;
+{
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* <span class="hljs-title">GetName</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span> </span>{ <span class="hljs-keyword">return</span> <span class="hljs-string">"health"</span>; }
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-keyword">void</span> <span class="hljs-title">Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+    <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
+};
+
+<span class="hljs-comment">// ***health_system.cpp***</span>
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">HealthSystem::Act</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
+</span>{
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">size_t</span> id : GetHealthEntities())
+    {
+        HitPoints&amp; hitPoints = GetComponent&lt;HitPoints&gt;(id);
+        <span class="hljs-keyword">const</span> Damage&amp; damage = GetComponent&lt;<span class="hljs-keyword">const</span> Damage&gt;(id);
+        hitPoints -= damage;
+        RemoveComponent&lt;Damage&gt;(id);
+    }
+}
+
+<span class="hljs-function"><span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">HealthSystem::GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span>
+</span>{
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;Info&lt;&gt;::GetComponentTypes, Typelist&lt;HitPoints, <span class="hljs-keyword">const</span> Damage&gt;&gt;::value, <span class="hljs-string">""</span>);
+    <span class="hljs-keyword">static_assert</span>(<span class="hljs-built_in">std</span>::is_same&lt;Info&lt;&gt;::RemoveComponentTypes, Typelist&lt;Damage&gt;&gt;::value, <span class="hljs-string">""</span>);
+    <span class="hljs-keyword">return</span> GetTypeIDs(Info&lt;&gt;::GetComponentTypes{});
+}
+
+<span class="hljs-comment">// ***main.cpp***</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;iostream&gt;</span></span>
+
+<span class="hljs-function"><span class="hljs-keyword">bool</span> <span class="hljs-title">SystemsShareResources</span><span class="hljs-params">(<span class="hljs-keyword">const</span> GameSystem&amp; system1, <span class="hljs-keyword">const</span> GameSystem&amp; system2)</span>
+</span>{
+    <span class="hljs-comment">// Quick-and-dirty overlap check.</span>
+    <span class="hljs-keyword">for</span>(ID id1 : system1.GetAccessedTypeIDs())
+    {
+        <span class="hljs-keyword">for</span> (ID id2 : system2.GetAccessedTypeIDs())
+        {
+            <span class="hljs-keyword">if</span>(id1 == id2)
+            {
+                <span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>;
+            }
+        }
+    }
+    <span class="hljs-keyword">return</span> <span class="hljs-literal">false</span>;
+}
+
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">PrintSystemOverlapState</span><span class="hljs-params">(<span class="hljs-keyword">const</span> GameSystem&amp; system1, <span class="hljs-keyword">const</span> GameSystem&amp; system2)</span>
+</span>{
+    <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span>* result = SystemsShareResources(system1, system2) ? <span class="hljs-string">" CANNOT"</span> : <span class="hljs-string">" CAN"</span>;
+    <span class="hljs-built_in">std</span>::<span class="hljs-built_in">cout</span> &lt;&lt; system1.GetName() &lt;&lt; <span class="hljs-string">" and "</span> &lt;&lt; system2.GetName() &lt;&lt; result &lt;&lt; <span class="hljs-string">" call Act() at the same time."</span> &lt;&lt; <span class="hljs-built_in">std</span>::<span class="hljs-built_in">endl</span>;
+}
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">()</span>
+</span>{
+    PhysicsSystem physicsSystem;
+    GraphicsSystem graphicsSystem;
+    HealthSystem healthSystem;
+    
+    <span class="hljs-comment">// Runtime checks for TUs that don't observe calls to GetComponent().</span>
+    PrintSystemOverlapState(physicsSystem, graphicsSystem); <span class="hljs-comment">// Cannot overlap.</span>
+    PrintSystemOverlapState(physicsSystem, healthSystem); <span class="hljs-comment">// Can overlap.</span>
+    PrintSystemOverlapState(healthSystem, graphicsSystem); <span class="hljs-comment">// Can overlap.</span>
+}
+
+</div></code></pre>
+
+</body>
+</html>
