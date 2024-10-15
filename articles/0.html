@@ -524,7 +524,7 @@ code {
     <span class="hljs-keyword">return</span> GetTypeIDs(Info&lt;&gt;::GetComponentTypes{});
 }
 </div></code></pre>
-<p>I stumbled a lot trying to get this to work, so I'll be building up the solution gradually in hopes that it helps someone else that might be trying to solve the same problems. I'll be focusing on the practical (&quot;This won't compile until...&quot;) over the theoretical (&quot;The standard states that...&quot;) for a few reasons.</p>
+<p>I stumbled a lot trying to get this to work, so I'll be building up the solution gradually in hopes that it helps someone else who might be trying to solve the same problems. I'll be focusing on the practical (&quot;This won't compile until...&quot;) over the theoretical (&quot;The standard states that...&quot;) for a few reasons.</p>
 <ul>
 <li>Compilers have unique behaviors, so we can't just rely on the standard. With small tweaks, we can support all major compilers.</li>
 <li>I've tweaked this code to ensure it conforms to my understanding of the standard (especially section <a href="https://timsong-cpp.github.io/cppwp/n4140/temp.point#8">temp.point/8</a>). However, I am not a standards expert, and I want to avoid acting like one. I have not read all parts of the standard, and I could be misunderstanding the parts I've read. Please challenge me if you think you see something in the standard that would make this code ill-formed.</li>
@@ -1059,7 +1059,7 @@ struct MaxIndex {
 <span class="hljs-keyword">using</span> ListGetter_t = <span class="hljs-keyword">typename</span> ListGetter&lt;Tag, n&gt;::type;
 </div></code></pre>
 <p>Note that unlike <code>AddType</code>, <code>ListGetter</code> is a class template. This is because <code>ListGetter</code> doesn't have any side-effects, so we don't need to ensure the type gets instantiated in unevaluated contexts.</p>
-<p>By taking in <code>n</code> as a template parameter, we don't need to do any of the fancy re-evaluation <code>MaxIndex</code> did. We just always have <code>ListGetter&lt;Tag, 3&gt;</code> append to <code>ListGetter&lt;Tag, 2&gt;</code> and so on. This also makes it easy to terminate the recursion by specializing <code>ListGetter&lt;Tag, 0&gt;</code> to return a blank typelist. Finally we add a convenience alias to get the type, and make sure we default <code>n</code> to <code>MaxIndex&lt;Tag&gt;</code> so all the user has to do is type <code>ListGetter_t&lt;Tag&gt;</code> to get an up-to-date stateful typelist.</p>
+<p>By taking in <code>n</code> as a template parameter, we don't need to do any of the fancy re-evaluation <code>MaxIndex</code> did. We just always have <code>ListGetter&lt;Tag, 3&gt;</code> append to <code>ListGetter&lt;Tag, 2&gt;</code> and so on. This also makes it easy to terminate the recursion by specializing <code>ListGetter&lt;Tag, 0&gt;</code> to return a blank typelist. Finally, we add a convenience alias to get the type, and make sure we default <code>n</code> to <code>MaxIndex&lt;Tag&gt;</code> so all the user has to do is type <code>ListGetter_t&lt;Tag&gt;</code> to get an up-to-date stateful typelist.</p>
 <img src="http://www.plantuml.com/plantuml/svg/lP5D2i8m48NtESNWIj7-fCimXEwauC95Bv2sWrHib2O5fVJk9YqM1OMktCnCU8_v7fFKMDNQhhamTYtEL5fO7MfZzsGjjHZB5IW3xXL3pm2mbbZ8esfLGqut61KIerewIGk8NGl3sPPfjrkNz6QoZni9o5tr49Hi-8hbCvOlmF9bsD4LmjQlzGdMcQxeZhawxI2M_R3v4IQPmoJ_2SDVOVpPXV1-mA0Bndi8uIgRfWybcHIMagxSTpu1" alt="uml diagram">
 <p>With this, we finally have a complete stateful typelist implementation! Next, let's showcase it by using it in the template tracker.</p>
 <p><a name="6"></a></p>
@@ -1090,7 +1090,7 @@ struct MaxIndex {
 };
 </div></code></pre>
 <p>Just like with <code>AddType</code>, we need to make sure our side-effects happen in the default template arguments, otherwise we might not see the changes to our stateful typelist until it's too late!</p>
-<p>Since these are demo functions, they don't do much, but there's no limitations. The parameters, template parameters, and body can be extended however needed.</p>
+<p>Since these are demo functions, they don't do much, but there are no limitations. The parameters, template parameters, and body can be extended however needed.</p>
 <p>And with this, we're 99% of the way there! All that's left now is to add a type alias to get the stateful typelists, and our final piece of the puzzle, the TemplateTracker, is complete.</p>
 <pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">TemplateTracker</span> {</span>
     <span class="hljs-comment">// ...</span>
@@ -1243,9 +1243,9 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 <p>Given that different projects have different risk tolerances, I can't really tell you whether it's safe to use these techniques in your project. I can, however, offer some details that can help you decide whether you want use this code:</p>
 <ul>
 <li>I am not an expert on the standard. It's possible that I missed some detail on this section that makes this code Ill-Formed, No Diagnostics Required (IFNDR). If I have missed some detail in the standard that makes this code ill-formed, <em>please</em> let me know, as I'd love to at least warn people, or at best find a solution that's well-formed.</li>
-<li>The C++ Core Working Group proposed finding a way to make friend injection ill-formed in <a href="https://cplusplus.github.io/CWG/issues/2118.html">issue 2118</a>. This issue was raised over 9 years ago in 2015, and as far as I know, nothing new has changed.</li>
+<li>The C++ Core Working Group proposed finding a way to make friend injection ill-formed in <a href="https://cplusplus.github.io/CWG/issues/2118.html">issue 2118</a>. This issue was raised over 9 years ago in 2015, and as far as I know, nothing has changed since then.</li>
 <li>These techniques, even if well-formed, rely on some uncommon styles of metaprogramming. Compilers had bugs as recently as 3 years ago that stopped this code from compiling. Techniques this niche are more likely to break from compilers introducing a regression, and these regressions are less likely to have fixes prioritized since they affect fewer people.</li>
-<li>It's not to hard to avoid calling tracked templates or access <code>TemplateTracker::Info&lt;&gt;</code> in headers. However, if a new engineer isn't aware of these rules, it's easy for them to do so accidentally. Worse, since some misuses of <code>TemplateTracker</code> result in Ill-Formed, No Diagnostics Needed (IFNDR) programs, it's possible for a new dev to sneak in ill-formed code without anyone realizing.</li>
+<li>It's not too hard to avoid calling tracked templates or accessing <code>TemplateTracker::Info&lt;&gt;</code> in headers. However, if a new engineer isn't aware of these rules, it's easy for them to do so accidentally. Worse, since some misuses of <code>TemplateTracker</code> result in Ill-Formed, No Diagnostics Needed (IFNDR) programs, it's possible for a new dev to sneak in ill-formed code without anyone realizing.</li>
 </ul>
 <p><a name="8"></a></p>
 <h2 id="references-and-thanks">References and thanks</h2>
@@ -1254,7 +1254,7 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 <li>Thanks to Olivia Alegria for editing this article.</li>
 <li>Thanks to Filip Roséen for his series on &quot;<a href="https://b.atch.se/posts/non-constant-constant-expressions/">Non-constant constant-expressions in C++</a>&quot;, which was my introduction to stateful metaprogramming.</li>
 <li>Thanks to Kris Jusiak for his C++20 <a href="https://news.ycombinator.com/item?id=39166067">compile-time type list</a>. Even though I didn't end up using C++20, I don't think I would have had the courage to try C++14 if I didn't have his working solution to start from.</li>
-<li>Thank you so much for reading through this article; I really hope it benefited you. If you looked at the code and had any questions, found any problems, or came up with a better way to do anything, please let me know--I'd love to talk about it or maybe improve this article.</li>
+<li>Thank you so much for reading through this article; I really hope it benefited you. If you looked at the code and had any questions, found any problems, or came up with a better way to do anything, please let me know--I'd love to talk about it and hopefully improve this article.</li>
 </ul>
 <p>Thanks again!</p>
 <p><a name="9"></a></p>
