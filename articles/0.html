@@ -498,7 +498,7 @@ code {
     };
 }
 </div></code></pre>
-<p>While this approach seems ideal for a large project with a more refined build system, I didn't want to complicate the simple build process of my small game. On top of this, I worried about edge cases that might be hard for a codegen parser to catch. This is the option I understand the least though, so if you've had success with it, please let me know!</p>
+<p>While this approach seems ideal for a large project with a more refined build system, I didn't want to complicate the simple build process of my small game. On top of this, I worried about edge cases that might be hard for a codegen parser to catch. This is the option I understand the least though, so if you've had success with it, please <a href="https://medium.com/@joshua.maiche/look-ma-no-codegen-tracking-templates-at-compile-time-using-pure-c-14-59df6dbf8682">let me know</a>!</p>
 <p>This left me with the solution I'll be sharing here: A compile-time, pure C++ way to track template instantiations. Adapting a game system to use this is trivial: just inherit from <code>TemplateTracker</code>, and add a function that reads the the auto-generated typelist.</p>
 <pre class="hljs"><code><div><span class="hljs-comment">// ***physics_system.h***</span>
 <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">PhysicsSystem</span> :</span>
@@ -526,7 +526,7 @@ code {
 <p>I stumbled a lot trying to get this to work, so I'll be building up the solution gradually in hopes that it helps someone else who might be trying to solve the same problems. I'll be focusing on the practical (&quot;This won't compile until...&quot;) over the theoretical (&quot;The standard states that...&quot;) for a few reasons.</p>
 <ul>
 <li>Compilers have unique behaviors, so we can't just rely on the standard. With small tweaks, we can support all major compilers.</li>
-<li>I've tweaked this code to ensure it conforms to my understanding of the standard (especially section <a href="https://timsong-cpp.github.io/cppwp/n4140/temp.point#8">temp.point/8</a>). However, I am not a standards expert, and I want to avoid acting like one. I have not read all parts of the standard, and I could be misunderstanding the parts I've read. Please challenge me if you think you see something in the standard that would make this code ill-formed.</li>
+<li>I've tweaked this code to ensure it conforms to my understanding of the standard (especially section <a href="https://timsong-cpp.github.io/cppwp/n4140/temp.point#8">temp.point/8</a>). However, I am not a standards expert, and I want to avoid acting like one. I have not read all parts of the standard, and I could be misunderstanding the parts I've read. Please <a href="https://medium.com/@joshua.maiche/look-ma-no-codegen-tracking-templates-at-compile-time-using-pure-c-14-59df6dbf8682">challenge me</a> if you think you see something in the standard that would make this code ill-formed.</li>
 <li>Personally, I find it easier to work through practical examples.</li>
 </ul>
 <p>This implementation supports C++14 or later. MSVC 16.3+ is supported with <code>/W4 /WX</code> flags. Clang 12+ and GCC 7+ are supported with <code>-Wall -Wextra -pedantic -Werror</code> flags.</p>
@@ -1238,7 +1238,7 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 <h3 id="risks">Risks</h3>
 <p>Given that different projects have different risk tolerances, I can't really tell you whether it's safe to use these techniques in your project. I can, however, offer some details that can help you decide whether you want use this code:</p>
 <ul>
-<li>I am not an expert on the standard. It's possible that I missed some detail on this section that makes this code Ill-Formed, No Diagnostics Required (IFNDR). If I have missed some detail in the standard that makes this code ill-formed, <em>please</em> let me know, as I'd love to at least warn people, or even better, find a solution that's well-formed.</li>
+<li>I am not an expert on the standard. It's possible that I missed some detail on this section that makes this code Ill-Formed, No Diagnostics Required (IFNDR). If I have missed some detail in the standard that makes this code ill-formed, <em>please</em> <a href="https://medium.com/@joshua.maiche/look-ma-no-codegen-tracking-templates-at-compile-time-using-pure-c-14-59df6dbf8682">let me know</a>, as I'd love to at least warn people, or even better, find a solution that's well-formed.</li>
 <li>The C++ Core Working Group proposed finding a way to make friend injection ill-formed in <a href="https://cplusplus.github.io/CWG/issues/2118.html">issue 2118</a>. This issue was raised over 9 years ago in 2015, and as far as I know, nothing has changed since then.</li>
 <li>These techniques, even if well-formed, rely on some uncommon styles of metaprogramming. Compilers had bugs as recently as 3 years ago that stopped this code from compiling. Techniques this niche are more likely to break from compilers introducing a regression, and these regressions are less likely to have fixes prioritized since they affect fewer people.</li>
 <li>It's not too hard to avoid calling tracked templates or accessing <code>TemplateTracker::Info&lt;&gt;</code> in headers. However, if a new engineer isn't aware of these rules, it's easy for them to do so accidentally. Worse, since some misuses of <code>TemplateTracker</code> result in Ill-Formed, No Diagnostics Needed (IFNDR) programs, it's possible for a new dev to sneak in ill-formed code without anyone realizing.</li>
@@ -1250,7 +1250,7 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 <li>Thanks to Olivia Alegria for editing this article.</li>
 <li>Thanks to Filip Roséen for his series on &quot;<a href="https://b.atch.se/posts/non-constant-constant-expressions/">Non-constant constant-expressions in C++</a>&quot;, which was my introduction to stateful metaprogramming.</li>
 <li>Thanks to Kris Jusiak for his C++20 <a href="https://news.ycombinator.com/item?id=39166067">compile-time type list</a>. Even though I didn't end up using C++20, I don't think I would have had the courage to try C++14 if I didn't have his working solution to start from.</li>
-<li>Thank you so much for reading through this article; I really hope it benefited you. If you looked at the code and had any questions, found any problems, or came up with a better way to do anything, please let me know--I'd love to talk about it and hopefully improve this article.</li>
+<li>Thank you so much for reading through this article; I really hope it benefited you. If you looked at the code and had any questions, found any problems, or came up with a better way to do anything, please <a href="https://medium.com/@joshua.maiche/look-ma-no-codegen-tracking-templates-at-compile-time-using-pure-c-14-59df6dbf8682">let me know</a>--I'd love to talk about it and hopefully improve this article.</li>
 </ul>
 <p>Thanks again!</p>
 <p><a name="9"></a></p>
