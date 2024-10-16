@@ -422,7 +422,6 @@ code {
         system-&gt;Act();
     }
 }
-
 </div></code></pre>
 <p>Act would modify the game's data using functions like this:</p>
 <pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">PhysicsSystem::Act</span><span class="hljs-params">()</span> </span>{
@@ -615,7 +614,7 @@ Within a function, any constexpr bools, classes, or lambdas won't be accessible 
 </div></code></pre>
 <p><a name="2_1"></a></p>
 <h3 id="tracking-global-types-from-inside-a-function">Tracking global types from inside a function</h3>
-<p>Bringing this back to type information, we can modify our previous code to pass around types. Recall that our typelist is trivial to construct, so we can change our injector code code to return a typelist based on the template type. Since the type is no longer known at function declaration, we need to make the return type <code>auto</code>. On the <code>GetterFunction()</code> side, we can extract the type from the <code>GetType()</code> by calling declspec on it.</p>
+<p>Bringing this back to type information, we can modify our previous code to pass around types. Recall that our typelist is trivial to construct, so we can change our injector code code to return a typelist based on the template type. Since the type is no longer known at function declaration, we need to make the return type <code>auto</code>. On the <code>GetterFunction()</code> side, we can extract the type from the <code>GetType()</code> by calling <code>declspec</code> on it.</p>
 <pre class="hljs"><code><div><span class="hljs-function"><span class="hljs-keyword">constexpr</span> <span class="hljs-keyword">auto</span> <span class="hljs-title">GetType</span><span class="hljs-params">()</span></span>;
 
 <span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> T&gt;
@@ -751,7 +750,6 @@ TypeSetter&lt;<span class="hljs-number">0</span>, <span class="hljs-keyword">flo
     <span class="hljs-comment">// Automatically know all types set!</span>
     <span class="hljs-keyword">using</span> AllTypes = GetAllTypes&lt;GoodTag&gt;;
 }
-
 </div></code></pre>
 <p>This all starts with checking if an index is set yet. Let's simplify the problem. Ignoring C++14 compatibility for a moment, how can we check if a function overload exists? We might consider a simple function template with a requires expression to see if a function exists.</p>
 <pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;<span class="hljs-keyword">typename</span> Tag, <span class="hljs-keyword">size_t</span> n&gt;
@@ -830,7 +828,7 @@ TypeSetter&lt;<span class="hljs-number">0</span>, <span class="hljs-keyword">flo
 <p>So, in C++14, how can we have an auto-deduced unique parameter for each index? What if we used recursion? There are 3 obstacles to making this possible.</p>
 <p><a name="4_1"></a></p>
 <h3 id="obstacle-1-the-recursion-must-use-new-instances">Obstacle 1: The recursion must use new instances</h3>
-<p>These example wouldn't work, for instance:</p>
+<p>These examples wouldn't work, for instance:</p>
 <pre class="hljs"><code><div><span class="hljs-keyword">template</span> &lt;
     <span class="hljs-keyword">typename</span> Tag,
     <span class="hljs-keyword">size_t</span> n = <span class="hljs-number">0</span>,
@@ -930,7 +928,7 @@ struct RecurseOnce {};
     <span class="hljs-keyword">bool</span> keepRecursing = <span class="hljs-literal">true</span>,
     <span class="hljs-keyword">typename</span> Next = <span class="hljs-keyword">typename</span> OuterType::<span class="hljs-keyword">template</span> RecurseOnce&lt;OuterType, <span class="hljs-literal">false</span>&gt;
 &gt;
-struct RecurseOnce {};  
+struct RecurseOnce {};
 </div></code></pre>
 <p>The good news is, we can do this by splitting the template in 2! <code>Outer</code> can be templated to now serve the additional purpose of offering different definitions of RecurseOnce, depending on whether the recursion condition is still met or not.</p>
 <pre class="hljs"><code><div><span class="hljs-keyword">template</span>&lt;<span class="hljs-keyword">bool</span> keepRecursing = <span class="hljs-literal">true</span>&gt;
@@ -1106,7 +1104,6 @@ struct MaxIndex {
         <span class="hljs-keyword">using</span> RemoveComponentTypes = ListGetter_t&lt;RemoveComponentTag, removeComponentTypesN&gt;;
     };
 };
-
 </div></code></pre>
 <p>Like before, the max indices for stateful typelist must be default template arguments, so the template instances can be different as new types are appended. <code>GetComponentTagType</code> and <code>RemoveComponentTagType</code> are there so that <code>getComponentTypesN</code> and <code>removeComponentTypesN</code> depend on them. Otherwise, like with <code>MaxIndex</code>, Clang will reuse the previous default arguments, making <code>getComponentTypesN</code> and <code>removeComponentTypesN</code> fail to update as the stateful typelists change.</p>
 <p>Having both <code>GetComponentTagType</code> and <code>removeComponentTagType</code> might seem excessive. Maybe we could just have <code>TemplateTrackerType</code>, and do something like this?</p>
@@ -1132,7 +1129,6 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 
     <span class="hljs-comment">// Use functions to let the .cpp convert compile-time type info to run-time type info.</span>
     <span class="hljs-function"><span class="hljs-keyword">virtual</span> <span class="hljs-built_in">std</span>::<span class="hljs-built_in">vector</span>&lt;ID&gt; <span class="hljs-title">GetAccessedTypeIDs</span><span class="hljs-params">()</span> <span class="hljs-keyword">const</span> <span class="hljs-keyword">override</span></span>;
-
 };
 </div></code></pre>
 <p>For using the template tracker, we could just declare and use it in the function. This prevents the template tracker from even being exposed in the header.</p>
@@ -1242,7 +1238,7 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 <h3 id="risks">Risks</h3>
 <p>Given that different projects have different risk tolerances, I can't really tell you whether it's safe to use these techniques in your project. I can, however, offer some details that can help you decide whether you want use this code:</p>
 <ul>
-<li>I am not an expert on the standard. It's possible that I missed some detail on this section that makes this code Ill-Formed, No Diagnostics Required (IFNDR). If I have missed some detail in the standard that makes this code ill-formed, <em>please</em> let me know, as I'd love to at least warn people, or at best find a solution that's well-formed.</li>
+<li>I am not an expert on the standard. It's possible that I missed some detail on this section that makes this code Ill-Formed, No Diagnostics Required (IFNDR). If I have missed some detail in the standard that makes this code ill-formed, <em>please</em> let me know, as I'd love to at least warn people, or even better, find a solution that's well-formed.</li>
 <li>The C++ Core Working Group proposed finding a way to make friend injection ill-formed in <a href="https://cplusplus.github.io/CWG/issues/2118.html">issue 2118</a>. This issue was raised over 9 years ago in 2015, and as far as I know, nothing has changed since then.</li>
 <li>These techniques, even if well-formed, rely on some uncommon styles of metaprogramming. Compilers had bugs as recently as 3 years ago that stopped this code from compiling. Techniques this niche are more likely to break from compilers introducing a regression, and these regressions are less likely to have fixes prioritized since they affect fewer people.</li>
 <li>It's not too hard to avoid calling tracked templates or accessing <code>TemplateTracker::Info&lt;&gt;</code> in headers. However, if a new engineer isn't aware of these rules, it's easy for them to do so accidentally. Worse, since some misuses of <code>TemplateTracker</code> result in Ill-Formed, No Diagnostics Needed (IFNDR) programs, it's possible for a new dev to sneak in ill-formed code without anyone realizing.</li>
@@ -1250,7 +1246,7 @@ struct Info {<span class="hljs-comment">/*...*/</span>};
 <p><a name="8"></a></p>
 <h2 id="references-and-thanks">References and thanks</h2>
 <ul>
-<li>Thanks to James Beaumont-Field, Spencer Miller, and Ted Rivera for checking this article is technically sound.</li>
+<li>Thanks to James Beaumont-Field, Spencer Miller, and Ted Rivera for their technical review and feedback on this article.</li>
 <li>Thanks to Olivia Alegria for editing this article.</li>
 <li>Thanks to Filip Roséen for his series on &quot;<a href="https://b.atch.se/posts/non-constant-constant-expressions/">Non-constant constant-expressions in C++</a>&quot;, which was my introduction to stateful metaprogramming.</li>
 <li>Thanks to Kris Jusiak for his C++20 <a href="https://news.ycombinator.com/item?id=39166067">compile-time type list</a>. Even though I didn't end up using C++20, I don't think I would have had the courage to try C++14 if I didn't have his working solution to start from.</li>
